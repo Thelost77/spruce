@@ -1,0 +1,79 @@
+package queue
+
+import (
+	"testing"
+
+	"github.com/Thelost77/spruce/internal/jellyfin"
+	"github.com/Thelost77/spruce/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func TestQueueModel_ActionsAndView(t *testing.T) {
+	tracks := []jellyfin.Track{
+		{ID: "t-1", Name: "Track 1", RunTimeTicks: 1800000000},
+		{ID: "t-2", Name: "Track 2", RunTimeTicks: 2400000000},
+	}
+
+	m := New(ui.DefaultStyles())
+	m.SetSize(80, 24)
+
+	// Test empty view
+	v := m.View()
+	if v == "" {
+		t.Error("expected non-empty view for empty queue")
+	}
+
+	// Populate queue
+	m.SetQueue(tracks, 0)
+	m.SetPlaybackState(true, false, 15.0, 180.0)
+
+	if len(m.Tracks()) != 2 || m.CurrentIndex() != 0 {
+		t.Fatalf("unexpected queue state: %d tracks, cur=%d", len(m.Tracks()), m.CurrentIndex())
+	}
+
+	// Test View with playing header
+	v = m.View()
+	if v == "" {
+		t.Error("expected non-empty view with playing queue")
+	}
+
+	// Test Enter (JumpQueueMsg)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected jump cmd")
+	}
+	msg := cmd()
+	if jqm, ok := msg.(JumpQueueMsg); !ok || jqm.Index != 0 {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test d (RemoveQueueMsg)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if cmd == nil {
+		t.Fatal("expected remove cmd")
+	}
+	msg = cmd()
+	if rqm, ok := msg.(RemoveQueueMsg); !ok || rqm.Index != 0 {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test n (Next action)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd == nil {
+		t.Fatal("expected next cmd")
+	}
+	msg = cmd()
+	if qam, ok := msg.(QueueActionMsg); !ok || qam.Action != "next" {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test space (toggle pause)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd == nil {
+		t.Fatal("expected toggle pause cmd")
+	}
+	msg = cmd()
+	if qam, ok := msg.(QueueActionMsg); !ok || qam.Action != "toggle_pause" {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+}

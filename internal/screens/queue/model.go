@@ -1,0 +1,126 @@
+package queue
+
+import (
+	"github.com/Thelost77/spruce/internal/jellyfin"
+	"github.com/Thelost77/spruce/internal/ui"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+type Model struct {
+	list list.Model
+
+	tracks       []jellyfin.Track
+	currentIndex int
+
+	isPlaying       bool
+	isPaused        bool
+	positionSeconds float64
+	durationSeconds float64
+
+	width  int
+	height int
+	styles ui.Styles
+}
+
+func New(styles ui.Styles) Model {
+	del := list.NewDefaultDelegate()
+	del.Styles.SelectedTitle = del.Styles.SelectedTitle.Foreground(styles.Accent.GetForeground()).BorderForeground(styles.Accent.GetForeground())
+	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
+
+	l := list.New(nil, del, 0, 0)
+	l.Title = "Queue / Now Playing"
+	l.SetShowStatusBar(true)
+	l.SetFilteringEnabled(true)
+	l.AdditionalFullHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "jump to")),
+			key.NewBinding(key.WithKeys("d", "x"), key.WithHelp("d/x", "remove")),
+			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear queue")),
+			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pause/resume")),
+			key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next")),
+			key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev")),
+		}
+	}
+
+	return Model{
+		list:   l,
+		styles: styles,
+	}
+}
+
+func (m *Model) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+	m.list.SetSize(width, height)
+}
+
+func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
+	m.tracks = tracks
+	m.currentIndex = currentIndex
+	items := make([]list.Item, len(tracks))
+	for i, t := range tracks {
+		items[i] = queueItem{
+			Track:     t,
+			Index:     i,
+			IsCurrent: i == currentIndex,
+		}
+	}
+	cmd := m.list.SetItems(items)
+	_ = cmd // SetItems returns cmd for spinner/etc if needed
+}
+
+func (m *Model) SetPlaybackState(isPlaying, isPaused bool, position, duration float64) {
+	m.isPlaying = isPlaying
+	m.isPaused = isPaused
+	m.positionSeconds = position
+	m.durationSeconds = duration
+}
+
+func (m Model) Init() tea.Cmd {
+	return nil
+}
+
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
+		switch msg.String() {
+		case "enter":
+			idx := m.list.Index()
+			if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
+				return m, func() tea.Msg { return JumpQueueMsg{Index: idx} }
+			}
+		case "d", "x", "delete":
+			idx := m.list.Index()
+			if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
+				return m, func() tea.Msg { return RemoveQueueMsg{Index: idx} }
+			}
+		case "c":
+			if len(m.tracks) > 0 {
+				return m, func() tea.Msg { return QueueActionMsg{Action: "clear"} }
+			}
+		case " ", "space":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "toggle_pause"} }
+		case "n":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "next"} }
+		case "p":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "prev"} }
+		}
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m Model) CurrentIndex() int {
+	return m.currentIndex
+}
+
+func (m Model) Tracks() []jellyfin.Track {
+	return m.tracks
+}
