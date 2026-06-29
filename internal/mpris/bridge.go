@@ -1,8 +1,6 @@
 package mpris
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/quarckster/go-mpris-server/pkg/events"
 	"github.com/quarckster/go-mpris-server/pkg/types"
@@ -32,20 +30,15 @@ func (b *Bridge) send(msg tea.Msg) {
 
 // Bind wires the adapter closures to read from accessor and send messages via program.Send().
 // accessor is a function that returns the current ModelAccessor, called on each read.
-// seekSeconds is the seek amount for Next/Previous (non-standard MPRIS).
-func (b *Bridge) Bind(accessor func() ModelAccessor, seekSeconds float64) {
+func (b *Bridge) Bind(accessor func() ModelAccessor) {
 	actions := PlayerActions{
 		Next: func() error {
-			b.send(SeekMsg{Offset: seekSeconds})
-			// DE media key daemons (GNOME, KDE, BlueZ) debounce "Next" keypresses by
-			// blocking until the track metadata (mpris:trackid) changes. Since we repurpose
-			// Next/Previous for seeking, the track doesn't change, causing a 5s timeout delay.
-			// Returning an error immediately aborts the DE's debounce wait state.
-			return fmt.Errorf("seek completed: returning error to bypass DE track-change debounce")
+			b.send(NextMsg{})
+			return nil
 		},
 		Previous: func() error {
-			b.send(SeekMsg{Offset: -seekSeconds})
-			return fmt.Errorf("seek completed: returning error to bypass DE track-change debounce")
+			b.send(PreviousMsg{})
+			return nil
 		},
 		Pause: func() error {
 			b.send(PlayPauseMsg{})

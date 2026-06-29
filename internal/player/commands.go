@@ -125,3 +125,14 @@ func QuitCmd(p Player) tea.Cmd {
 		return PlayerQuitMsg{}
 	}
 }
+
+// SeekCmd sends a seek request to mpv by offset seconds.
+func SeekCmd(p Player, offset float64) tea.Cmd {
+	return func() tea.Msg {
+		err := p.Seek(offset)
+		if err != nil {
+			return PositionMsg{Err: err}
+		}
+		return nil
+	}
+}

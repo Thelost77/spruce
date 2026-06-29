@@ -17,3 +17,9 @@ type SetVolumeMsg struct {
 type SetRateMsg struct {
 	Rate float64
 }
+
+// NextMsg is sent when MPRIS requests skipping to the next track.
+type NextMsg struct{}
+
+// PreviousMsg is sent when MPRIS requests skipping to the previous track.
+type PreviousMsg struct{}
