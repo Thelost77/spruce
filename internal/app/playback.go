@@ -16,12 +16,13 @@ func (m Model) startPlaybackAt(index int) (Model, tea.Cmd) {
 
 	m.currentIndex = index
 	m.playGeneration++
+	track := m.tracks[index]
+	m.playerState.Title = track.Name
 	m.playerState.Position = 0
-	m.playerState.Duration = m.tracks[index].Duration()
+	m.playerState.Duration = track.Duration()
 	m.playerState.Playing = true
 	m.lastHeartbeat = time.Now()
 
-	track := m.tracks[index]
 	logger.Info("starting track playback", "index", index, "id", track.ID, "title", track.Name)
 
 	m.syncQueueScreen()
@@ -50,6 +51,7 @@ func (m Model) startPlaybackAt(index int) (Model, tea.Cmd) {
 func (m Model) stopPlayback() (Model, tea.Cmd) {
 	logger.Info("stopping playback")
 	m.playGeneration++
+	m.playerState.Title = ""
 	m.playerState.Playing = false
 	m.playerState.Position = 0
 
@@ -81,8 +83,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 
 	if msg.Err != nil {
 		logger.Info("track ended or player error, advancing queue", "err", msg.Err)
-		if m.currentIndex+1 < len(m.tracks) {
-			return m.startPlaybackAt(m.currentIndex + 1)
+		nextIdx := m.nextIndex(m.currentIndex + 1)
+		if nextIdx < len(m.tracks) && nextIdx != m.currentIndex {
+			return m.startPlaybackAt(nextIdx)
 		}
 		return m.stopPlayback()
 	}

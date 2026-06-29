@@ -191,7 +191,7 @@ func (c *Client) GetArtists(ctx context.Context, libraryID string) ([]Artist, er
 	params.Set("ParentId", libraryID)
 	params.Set("SortBy", "SortName")
 	params.Set("SortOrder", "Ascending")
-	params.Set("IncludeItemTypes", "MusicArtist")
+	params.Set("IncludeItemTypes", "MusicArtist,Artist")
 	params.Set("Recursive", "true")
 
 	path := fmt.Sprintf("/Users/%s/Items?%s", url.PathEscape(c.userID), params.Encode())
@@ -250,6 +250,30 @@ func (c *Client) GetTracks(ctx context.Context, albumID string) ([]Track, error)
 	var resp itemsResponse[Track]
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("decode tracks: %w", err)
+	}
+	return resp.Items, nil
+}
+
+// GetAllTracks fetches all audio tracks within a library.
+func (c *Client) GetAllTracks(ctx context.Context, libraryID string) ([]Track, error) {
+	if c.userID == "" {
+		return nil, errors.New("user ID not set")
+	}
+	params := url.Values{}
+	params.Set("ParentId", libraryID)
+	params.Set("SortBy", "SortName")
+	params.Set("SortOrder", "Ascending")
+	params.Set("IncludeItemTypes", "Audio")
+	params.Set("Recursive", "true")
+
+	path := fmt.Sprintf("/Users/%s/Items?%s", url.PathEscape(c.userID), params.Encode())
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get all tracks: %w", err)
+	}
+	var resp itemsResponse[Track]
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("decode all tracks: %w", err)
 	}
 	return resp.Items, nil
 }

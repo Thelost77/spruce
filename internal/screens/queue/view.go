@@ -26,7 +26,12 @@ func (m Model) View() string {
 			dur = ui.FormatTimestamp(cur.Duration())
 		}
 
-		titleStr := m.styles.Accent.Render(fmt.Sprintf("%s %s", statusIcon, cur.Name))
+		shuffleStr := ""
+		if m.isShuffle {
+			shuffleStr = " " + m.styles.Accent.Render("🔀 [Shuffle]")
+		}
+
+		titleStr := m.styles.Accent.Render(fmt.Sprintf("%s %s", statusIcon, cur.Name)) + shuffleStr
 		artistStr := m.styles.Muted.Render(cur.DisplayArtist())
 		timeStr := m.styles.Muted.Render(fmt.Sprintf("[%s / %s]", pos, dur))
 

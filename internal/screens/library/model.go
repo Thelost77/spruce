@@ -32,7 +32,10 @@ type Model struct {
 
 	selectedArtist jellyfin.Artist
 	selectedAlbum  jellyfin.Album
+	artists        []jellyfin.Artist
+	albums         []jellyfin.Album
 	tracks         []jellyfin.Track
+	allTracks      []jellyfin.Track
 
 	loading bool
 	err     error
@@ -48,6 +51,7 @@ func New(styles ui.Styles) Model {
 
 	initList := func(title string) list.Model {
 		l := list.New(nil, del, 0, 0)
+		l.KeyMap.Quit.SetKeys("q")
 		l.Title = title
 		l.SetShowStatusBar(true)
 		l.SetFilteringEnabled(true)
@@ -116,12 +120,23 @@ func (m Model) fetchTracksCmd(albumID string) tea.Cmd {
 	}
 }
 
+func (m Model) FetchAllTracksCmd() tea.Cmd {
+	client := m.client
+	libID := m.libraryID
+	return func() tea.Msg {
+		logger.Info("fetching all library tracks", "libraryID", libID)
+		tracks, err := client.GetAllTracks(context.Background(), libID)
+		return AllTracksLoadedMsg{Tracks: tracks, Err: err}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ArtistsLoadedMsg:
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
+			m.artists = msg.Artists
 			items := make([]list.Item, len(msg.Artists))
 			for i, a := range msg.Artists {
 				items[i] = artistItem{Artist: a}
@@ -135,6 +150,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
+			m.albums = msg.Albums
 			items := make([]list.Item, len(msg.Albums))
 			for i, a := range msg.Albums {
 				items[i] = albumItem{Album: a}
@@ -159,6 +175,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			cmd := m.trackList.SetItems(items)
 			m.level = LevelTracks
 			return m, cmd
+		}
+		return m, nil
+
+	case AllTracksLoadedMsg:
+		if msg.Err == nil {
+			m.allTracks = msg.Tracks
 		}
 		return m, nil
 
@@ -238,4 +260,34 @@ func (m Model) Loading() bool {
 
 func (m Model) Error() error {
 	return m.err
+}
+
+func (m Model) Artists() []jellyfin.Artist {
+	return m.artists
+}
+
+func (m Model) Albums() []jellyfin.Album {
+	return m.albums
+}
+
+func (m Model) Tracks() []jellyfin.Track {
+	return m.tracks
+}
+
+func (m Model) AllTracks() []jellyfin.Track {
+	return m.allTracks
+}
+
+func (m *Model) SetAllTracks(tracks []jellyfin.Track) {
+	m.allTracks = tracks
+}
+
+func (m Model) IsFiltering() bool {
+	return m.activeList().FilterState() == list.Filtering
+}
+
+func (m *Model) SelectArtist(artist jellyfin.Artist) tea.Cmd {
+	m.selectedArtist = artist
+	m.loading = true
+	return m.fetchAlbumsCmd(artist.ID)
 }

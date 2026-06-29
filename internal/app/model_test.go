@@ -13,6 +13,8 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/screens/login"
 	"github.com/Thelost77/spruce/internal/screens/queue"
+	"github.com/Thelost77/spruce/internal/ui/components"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
@@ -116,5 +118,64 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	v := m.View()
 	if v == "" {
 		t.Error("expected non-empty view")
+	}
+}
+
+func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+
+	// Test open palette with ctrl+p
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = newM.(Model)
+	if !m.palette.Visible() {
+		t.Fatal("expected palette to be visible after ctrl+p")
+	}
+
+	// Test View overlay when palette is open
+	v := m.View()
+	if v == "" {
+		t.Error("expected non-empty view when palette is overlaid")
+	}
+
+	// Test executing a static palette action directly via handlePaletteAction
+	newM, _ = m.handlePaletteAction(components.ActionShowQueue, "", nil)
+	m = newM.(Model)
+	if m.screen != ScreenQueue {
+		t.Errorf("expected screen to switch to queue, got %v", m.screen)
+	}
+	m.palette.Close()
+
+	// Test global key s (shuffle toggle)
+	if m.shuffle {
+		t.Error("expected shuffle false initially")
+	}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = newM.(Model)
+	if !m.shuffle {
+		t.Error("expected shuffle true after pressing s")
+	}
+
+	// Setup tracks to test global n / p
+	tracks := []jellyfin.Track{
+		{ID: "t-1", Name: "Track 1", RunTimeTicks: 1800000000},
+		{ID: "t-2", Name: "Track 2", RunTimeTicks: 1800000000},
+	}
+	m.tracks = tracks
+	m.currentIndex = 0
+
+	// Test global n (next)
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = newM.(Model)
+	if m.currentIndex != 1 {
+		t.Errorf("expected currentIndex 1 after n, got %d", m.currentIndex)
+	}
+
+	// Test global p (previous)
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = newM.(Model)
+	if m.currentIndex != 0 {
+		t.Errorf("expected currentIndex 0 after p, got %d", m.currentIndex)
 	}
 }

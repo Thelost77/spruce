@@ -25,3 +25,9 @@ type TracksLoadedMsg struct {
 	Tracks []jellyfin.Track
 	Err    error
 }
+
+// AllTracksLoadedMsg is received when all tracks in the library are loaded.
+type AllTracksLoadedMsg struct {
+	Tracks []jellyfin.Track
+	Err    error
+}

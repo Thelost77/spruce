@@ -81,7 +81,7 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 		itemTypes := r.URL.Query().Get("IncludeItemTypes")
 
 		switch {
-		case itemTypes == "MusicArtist" && parentID == "lib-1":
+		case itemTypes == "MusicArtist,Artist" && parentID == "lib-1":
 			_ = json.NewEncoder(w).Encode(itemsResponse[Artist]{
 				Items: []Artist{{ID: "art-1", Name: "Pink Floyd"}},
 			})
@@ -90,6 +90,10 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 				Items: []Album{{ID: "alb-1", Name: "Dark Side of the Moon", ProductionYear: 1973}},
 			})
 		case itemTypes == "Audio" && parentID == "alb-1":
+			_ = json.NewEncoder(w).Encode(itemsResponse[Track]{
+				Items: []Track{{ID: "trk-1", Name: "Time", RunTimeTicks: 4230000000, Artists: []string{"Pink Floyd"}}},
+			})
+		case itemTypes == "Audio" && parentID == "lib-1":
 			_ = json.NewEncoder(w).Encode(itemsResponse[Track]{
 				Items: []Track{{ID: "trk-1", Name: "Time", RunTimeTicks: 4230000000, Artists: []string{"Pink Floyd"}}},
 			})
@@ -105,6 +109,11 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 	artists, err := client.GetArtists(ctx, "lib-1")
 	if err != nil || len(artists) != 1 || artists[0].Name != "Pink Floyd" {
 		t.Fatalf("GetArtists failed: %+v, err=%v", artists, err)
+	}
+
+	allTracks, err := client.GetAllTracks(ctx, "lib-1")
+	if err != nil || len(allTracks) != 1 || allTracks[0].Name != "Time" {
+		t.Fatalf("GetAllTracks failed: %+v, err=%v", allTracks, err)
 	}
 
 	albums, err := client.GetAlbums(ctx, "art-1")

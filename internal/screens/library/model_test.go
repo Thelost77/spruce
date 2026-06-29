@@ -17,7 +17,7 @@ func TestLibraryModel_NavigationAndPlayback(t *testing.T) {
 		parentID := r.URL.Query().Get("ParentId")
 
 		switch {
-		case itemTypes == "MusicArtist" && parentID == "lib-1":
+		case itemTypes == "MusicArtist,Artist" && parentID == "lib-1":
 			_ = json.NewEncoder(w).Encode(struct{ Items []jellyfin.Artist }{
 				Items: []jellyfin.Artist{{ID: "art-1", Name: "Radiohead"}},
 			})

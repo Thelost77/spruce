@@ -18,6 +18,7 @@ type Model struct {
 	isPaused        bool
 	positionSeconds float64
 	durationSeconds float64
+	isShuffle       bool
 
 	width  int
 	height int
@@ -30,6 +31,7 @@ func New(styles ui.Styles) Model {
 	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
 
 	l := list.New(nil, del, 0, 0)
+	l.KeyMap.Quit.SetKeys("q")
 	l.Title = "Queue / Now Playing"
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
@@ -41,6 +43,7 @@ func New(styles ui.Styles) Model {
 			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pause/resume")),
 			key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next")),
 			key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev")),
+			key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "shuffle")),
 		}
 	}
 
@@ -78,6 +81,10 @@ func (m *Model) SetPlaybackState(isPlaying, isPaused bool, position, duration fl
 	m.durationSeconds = duration
 }
 
+func (m *Model) SetShuffle(isShuffle bool) {
+	m.isShuffle = isShuffle
+}
+
 func (m Model) Init() tea.Cmd {
 	return nil
 }
@@ -109,6 +116,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg { return QueueActionMsg{Action: "next"} }
 		case "p":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "prev"} }
+		case "s":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "shuffle"} }
+		case "esc", "h", "left":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "back"} }
 		}
 	}
 
@@ -123,4 +134,8 @@ func (m Model) CurrentIndex() int {
 
 func (m Model) Tracks() []jellyfin.Track {
 	return m.tracks
+}
+
+func (m Model) IsFiltering() bool {
+	return m.list.FilterState() == list.Filtering
 }

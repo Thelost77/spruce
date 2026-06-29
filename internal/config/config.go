@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,7 +10,10 @@ import (
 )
 
 type ServerConfig struct {
-	Address string `toml:"address"`
+	Address  string `toml:"address"`
+	Username string `toml:"username"`
+	Token    string `toml:"token"`
+	UserID   string `toml:"user_id"`
 }
 
 type PlayerConfig struct {
@@ -118,4 +122,17 @@ func ConfigDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "spruce")
+}
+
+// Save writes a Config struct to path in TOML format.
+func Save(path string, cfg Config) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0600)
 }
