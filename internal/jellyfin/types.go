@@ -1,0 +1,91 @@
+package jellyfin
+
+// AuthRequest is the payload sent to POST /Users/AuthenticateByName.
+type AuthRequest struct {
+	Username string `json:"Username"`
+	Pw       string `json:"Pw"`
+}
+
+// AuthResponse is returned by POST /Users/AuthenticateByName.
+type AuthResponse struct {
+	User        User   `json:"User"`
+	AccessToken string `json:"AccessToken"`
+}
+
+// User represents a Jellyfin user account.
+type User struct {
+	ID   string `json:"Id"`
+	Name string `json:"Name"`
+}
+
+// Library represents a user view/collection in Jellyfin.
+type Library struct {
+	ID             string `json:"Id"`
+	Name           string `json:"Name"`
+	CollectionType string `json:"CollectionType,omitempty"` // e.g. "music"
+}
+
+// Artist represents a music artist item.
+type Artist struct {
+	ID   string `json:"Id"`
+	Name string `json:"Name"`
+}
+
+// Album represents a music album item.
+type Album struct {
+	ID             string   `json:"Id"`
+	Name           string   `json:"Name"`
+	ProductionYear int      `json:"ProductionYear,omitempty"`
+	Artists        []string `json:"Artists,omitempty"`
+}
+
+// Track represents a single audio track item.
+type Track struct {
+	ID                string   `json:"Id"`
+	Name              string   `json:"Name"`
+	RunTimeTicks      int64    `json:"RunTimeTicks,omitempty"` // 1 sec = 10,000,000 ticks
+	IndexNumber       int      `json:"IndexNumber,omitempty"`
+	ParentIndexNumber int      `json:"ParentIndexNumber,omitempty"` // Disc number
+	AlbumID           string   `json:"AlbumId,omitempty"`
+	Album             string   `json:"Album,omitempty"`
+	Artists           []string `json:"Artists,omitempty"`
+}
+
+// Duration returns the duration of the track in seconds.
+func (t Track) Duration() float64 {
+	if t.RunTimeTicks <= 0 {
+		return 0
+	}
+	return float64(t.RunTimeTicks) / 1e7
+}
+
+// DisplayArtist returns a formatted artist string for UI display.
+func (t Track) DisplayArtist() string {
+	if len(t.Artists) > 0 && t.Artists[0] != "" {
+		return t.Artists[0]
+	}
+	return "Unknown Artist"
+}
+
+// itemsResponse is the generic container returned by GET /Users/{UserId}/Items and /Views.
+type itemsResponse[T any] struct {
+	Items            []T `json:"Items"`
+	TotalRecordCount int `json:"TotalRecordCount,omitempty"`
+}
+
+// PlaybackProgressRequest is sent to POST /Sessions/Playing/Progress.
+type PlaybackProgressRequest struct {
+	ItemID        string `json:"ItemId"`
+	PositionTicks int64  `json:"PositionTicks"`
+	IsPaused      bool   `json:"IsPaused"`
+	PlayMethod    string `json:"PlayMethod"`
+	CanSeek       bool   `json:"CanSeek"`
+}
+
+// SecondsToTicks converts seconds to Jellyfin 100ns ticks.
+func SecondsToTicks(seconds float64) int64 {
+	if seconds <= 0 {
+		return 0
+	}
+	return int64(seconds * 1e7)
+}
