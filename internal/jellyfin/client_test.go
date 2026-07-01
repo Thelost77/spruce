@@ -67,11 +67,11 @@ func TestClient_GetMusicLibraries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMusicLibraries error: %v", err)
 	}
-	if len(libs) != 2 {
-		t.Fatalf("expected 2 music libraries, got %d", len(libs))
+	if len(libs) != 1 {
+		t.Fatalf("expected 1 music library (strict CollectionType==music), got %d", len(libs))
 	}
-	if libs[0].Name != "Music" || libs[1].Name != "Songs" {
-		t.Errorf("unexpected libraries: %+v", libs)
+	if libs[0].Name != "Music" {
+		t.Errorf("unexpected library: %+v", libs)
 	}
 }
 
@@ -143,6 +143,15 @@ func TestClient_StreamHelpersAndProgress(t *testing.T) {
 			if req.ItemID != "trk-1" || req.PositionTicks != 120000000 {
 				t.Errorf("unexpected progress req: %+v", req)
 			}
+			if req.PlayMethod != "DirectPlay" {
+				t.Errorf("expected PlayMethod DirectPlay, got %q", req.PlayMethod)
+			}
+			if req.PlaySessionId != "sess-1" {
+				t.Errorf("expected PlaySessionId sess-1, got %q", req.PlaySessionId)
+			}
+			if req.MediaSourceId != "trk-1" {
+				t.Errorf("expected MediaSourceId trk-1, got %q", req.MediaSourceId)
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -151,8 +160,9 @@ func TestClient_StreamHelpersAndProgress(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "token-xyz", "user-123")
-	streamURL := client.StreamURL("trk-1")
-	if streamURL != server.URL+"/Audio/trk-1/stream?static=true" {
+	streamURL := client.StreamURL("trk-1", "test-session")
+	wantQuery := "api_key=token-xyz&deviceId=spruce-tui&playSessionId=test-session&static=true"
+	if streamURL != server.URL+"/Audio/trk-1/stream?"+wantQuery {
 		t.Errorf("unexpected StreamURL: %q", streamURL)
 	}
 	headers := client.StreamHeaders()
@@ -160,7 +170,7 @@ func TestClient_StreamHelpersAndProgress(t *testing.T) {
 		t.Errorf("unexpected StreamHeaders: %v", headers)
 	}
 
-	err := client.ReportPlaybackProgress(context.Background(), "trk-1", 12.0, false)
+	err := client.ReportPlaybackProgress(context.Background(), "trk-1", 12.0, false, "sess-1")
 	if err != nil {
 		t.Fatalf("ReportPlaybackProgress error: %v", err)
 	}

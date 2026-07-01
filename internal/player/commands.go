@@ -19,6 +19,15 @@ type PositionMsg struct {
 	Generation uint64 // ties this tick to a specific play session
 }
 
+// PlayerEndMsg is emitted when mpv broadcasts an end-file event, indicating the
+// current file finished (eof) or failed to load/decode (error/redirect). The
+// app uses the Reason to decide whether to auto-advance the queue.
+type PlayerEndMsg struct {
+	Generation uint64
+	Reason     string // "eof" | "error" | "redirect"
+	Err        error
+}
+
 // TickCmd returns a command that fires twice per second and polls mpv state.
 // The generation parameter ties the tick to a specific play session so stale
 // ticks from a previous session can be safely ignored.
@@ -134,5 +143,39 @@ func SeekCmd(p Player, offset float64) tea.Cmd {
 			return PositionMsg{Err: err}
 		}
 		return nil
+	}
+}
+
+// WatchEvents subscribes to mpv's IPC event stream and returns a PlayerEndMsg
+// when mpv broadcasts end-file (normal EOF, load/decode error, or redirect).
+// mpv auto-broadcasts end-file; no observe command is required.
+//
+// A side goroutine polls conn.IsClosed so that if mpv is killed without
+// emitting end-file (e.g. SIGKILL during stopPlayback), the event listener is
+// unregistered and this cmd returns a fatal PlayerEndMsg instead of leaking.
+func (m *Mpv) WatchEvents(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		if m == nil || m.conn == nil {
+			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("no mpv connection")}
+		}
+		events, stop := m.conn.NewEventListener()
+		if events == nil {
+			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("event listener unavailable")}
+		}
+		go func() {
+			for !m.conn.IsClosed() {
+				time.Sleep(200 * time.Millisecond)
+			}
+			close(stop)
+		}()
+		for ev := range events {
+			if ev == nil {
+				continue
+			}
+			if ev.Name == "end-file" {
+				return PlayerEndMsg{Generation: generation, Reason: ev.Reason}
+			}
+		}
+		return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("mpv connection closed")}
 	}
 }

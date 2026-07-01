@@ -43,32 +43,28 @@ func defaultGroups() []HelpGroup {
 			Title: "Global",
 			Bindings: []HelpBinding{
 				{Key: "q", Desc: "quit"},
-				{Key: "esc / ←", Desc: "go back"},
+				{Key: "esc / ←", Desc: "go back / close filter"},
 				{Key: "enter / →", Desc: "open / select"},
+				{Key: "tab", Desc: "switch library / queue"},
 				{Key: "?", Desc: "toggle help"},
-			},
-		},
-		{
-			Title: "Home",
-			Bindings: []HelpBinding{
-				{Key: "o", Desc: "open library"},
-				{Key: "tab", Desc: "switch library"},
 			},
 		},
 		{
 			Title: "Library",
 			Bindings: []HelpBinding{
-				{Key: "s", Desc: "browse series (books)"},
-				{Key: "tab", Desc: "switch library"},
+				{Key: "/", Desc: "filter list"},
+				{Key: "enter", Desc: "open album / play track"},
+				{Key: "a", Desc: "add track / album to queue"},
+				{Key: "A", Desc: "queue album"},
 			},
 		},
 		{
-			Title: "Navigation",
+			Title: "Queue",
 			Bindings: []HelpBinding{
-				{Key: "j / ↓", Desc: "move down"},
-				{Key: "k / ↑", Desc: "move up"},
-				{Key: "H / L", Desc: "page up / down"},
-				{Key: "tab", Desc: "toggle focus"},
+				{Key: "enter", Desc: "jump to track"},
+				{Key: "d / x", Desc: "remove track"},
+				{Key: "c", Desc: "clear queue"},
+				{Key: "/", Desc: "filter queue"},
 			},
 		},
 		{
@@ -78,31 +74,12 @@ func defaultGroups() []HelpGroup {
 				{Key: "l", Desc: "seek forward"},
 				{Key: "h", Desc: "seek backward"},
 				{Key: ">", Desc: "play next queued"},
+				{Key: "<", Desc: "play previous"},
 				{Key: "+", Desc: "speed up"},
 				{Key: "-", Desc: "speed down"},
 				{Key: "] / [", Desc: "volume up / down"},
-				{Key: "c", Desc: "open chapters"},
-				{Key: "n / N", Desc: "next / prev chapter"},
+				{Key: "s", Desc: "shuffle"},
 				{Key: "S", Desc: "sleep timer"},
-			},
-		},
-		{
-			Title: "Detail",
-			Bindings: []HelpBinding{
-				{Key: "enter / p", Desc: "play"},
-				{Key: "b", Desc: "add bookmark"},
-				{Key: "a", Desc: "add to queue"},
-				{Key: "A", Desc: "play next"},
-				{Key: "d", Desc: "delete bookmark"},
-				{Key: "f", Desc: "mark finished"},
-			},
-		},
-		{
-			Title: "Series",
-			Bindings: []HelpBinding{
-				{Key: "enter", Desc: "open selected book"},
-				{Key: "H / L", Desc: "page up / down"},
-				{Key: "esc / ←", Desc: "back"},
 			},
 		},
 	}

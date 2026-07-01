@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"time"
+
+	"github.com/quarckster/go-mpris-server/pkg/types"
 
 	"github.com/Thelost77/spruce/internal/logger"
 	"github.com/Thelost77/spruce/internal/player"
@@ -29,19 +32,20 @@ func (m Model) startPlaybackAt(index int) (Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 	if m.client != nil {
-		url := m.client.StreamURL(track.ID)
-		headers := m.client.StreamHeaders()
+		playSessionID := strconv.FormatInt(time.Now().UnixNano(), 16)
+		m.playSessionID = playSessionID
+		url := m.client.StreamURL(track.ID, playSessionID)
 		client := m.client
 		itemID := track.ID
 
 		startReqCmd := func() tea.Msg {
-			_ = client.ReportPlaybackStart(context.Background(), itemID)
+			_ = client.ReportPlaybackStart(context.Background(), itemID, playSessionID)
 			return nil
 		}
 		cmds = append(cmds, startReqCmd)
 
 		if m.mpv != nil {
-			cmds = append(cmds, player.LaunchCmd(m.mpv, url, 0, false, headers))
+			cmds = append(cmds, player.LaunchCmd(m.mpv, url, 0, false, nil))
 		}
 	}
 
@@ -54,14 +58,18 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	m.playerState.Title = ""
 	m.playerState.Playing = false
 	m.playerState.Position = 0
+	m.sleepDeadline = time.Time{}
+	m.sleepDuration = 0
+	m.playerState.SleepRemaining = ""
 
 	var cmds []tea.Cmd
 	if m.client != nil && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		client := m.client
 		itemID := m.tracks[m.currentIndex].ID
 		pos := m.playerState.Position
+		playSessionID := m.playSessionID
 		stopReqCmd := func() tea.Msg {
-			_ = client.ReportPlaybackStopped(context.Background(), itemID, pos)
+			_ = client.ReportPlaybackStopped(context.Background(), itemID, pos, playSessionID)
 			return nil
 		}
 		cmds = append(cmds, stopReqCmd)
@@ -82,11 +90,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if msg.Err != nil {
-		logger.Info("track ended or player error, advancing queue", "err", msg.Err)
-		nextIdx := m.nextIndex(m.currentIndex + 1)
-		if nextIdx < len(m.tracks) && nextIdx != m.currentIndex {
-			return m.startPlaybackAt(nextIdx)
-		}
+		logger.Error("player position poll failed (fatal)", "err", msg.Err)
+		// Do NOT auto-advance — this is a fatal load/socket error, not EOF.
+		// EOF is delivered via PlayerEndMsg{Reason:"eof"}.
 		return m.stopPlayback()
 	}
 
@@ -95,6 +101,15 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		m.playerState.Duration = msg.Duration
 	}
 	m.playerState.Playing = !msg.Paused
+
+	if !m.sleepDeadline.IsZero() {
+		remaining := time.Until(m.sleepDeadline)
+		if remaining <= 0 {
+			m.playerState.SleepRemaining = ""
+		} else {
+			m.playerState.SleepRemaining = formatSleepRemaining(remaining)
+		}
+	}
 
 	m.syncQueueScreen()
 
@@ -109,8 +124,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		itemID := m.tracks[m.currentIndex].ID
 		pos := m.playerState.Position
 		paused := msg.Paused
+		playSessionID := m.playSessionID
 		heartbeatCmd := func() tea.Msg {
-			_ = client.ReportPlaybackProgress(context.Background(), itemID, pos, paused)
+			_ = client.ReportPlaybackProgress(context.Background(), itemID, pos, paused, playSessionID)
 			return nil
 		}
 		cmds = append(cmds, heartbeatCmd)
@@ -119,8 +135,22 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func authorsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Model) syncQueueScreen() {
-	m.queueScreen.SetQueue(m.tracks, m.currentIndex)
+	if !m.queueScreen.IsFiltering() {
+		m.queueScreen.SetQueue(m.tracks, m.currentIndex)
+	}
 	m.queueScreen.SetPlaybackState(
 		m.IsPlaying(),
 		m.IsPaused(),
@@ -128,6 +158,7 @@ func (m *Model) syncQueueScreen() {
 		m.playerState.Duration,
 	)
 	if m.mprisState != nil {
+		oldState := *m.mprisState
 		m.mprisState.IsPlaying = m.IsPlaying()
 		m.mprisState.IsPaused = m.IsPaused()
 		if m.IsPlaying() {
@@ -149,5 +180,144 @@ func (m *Model) syncQueueScreen() {
 		m.mprisState.Speed = m.playerState.Speed
 		m.mprisState.Volume = m.playerState.Volume
 		m.mprisState.QueueLen = len(m.tracks)
+
+		if m.mprisBridge != nil {
+			handler := m.mprisBridge.EventHandler()
+			if handler != nil && handler.Player != nil {
+				playbackChanged := oldState.IsPlaying != m.mprisState.IsPlaying ||
+					oldState.IsPaused != m.mprisState.IsPaused ||
+					oldState.Speed != m.mprisState.Speed
+				metadataChanged := oldState.Title != m.mprisState.Title ||
+					oldState.ItemID != m.mprisState.ItemID ||
+					!authorsEqual(oldState.Authors, m.mprisState.Authors)
+				volumeChanged := oldState.Volume != m.mprisState.Volume
+				positionChanged := oldState.Position != m.mprisState.Position
+
+				if playbackChanged {
+					_ = handler.Player.OnPlayback()
+				}
+				if metadataChanged {
+					_ = handler.Player.OnTitle()
+				}
+				if volumeChanged {
+					_ = handler.Player.OnVolume()
+				}
+				if positionChanged {
+					now := time.Now()
+					if now.Sub(m.lastMprisEmit) >= time.Second {
+						m.lastMprisEmit = now
+						pos := types.Microseconds(m.mprisState.Position * 1_000_000)
+						_ = handler.Player.OnSeek(pos)
+					}
+				}
+			}
+		}
+	}
+	m.propagateSize()
+}
+
+func (m Model) handleSeek(offset float64) (Model, tea.Cmd) {
+	if m.mpv == nil || !m.IsPlaying() {
+		return m, nil
+	}
+	target := m.playerState.Position + offset
+	if target < 0 {
+		target = 0
+	}
+	if m.playerState.Duration > 0 && target > m.playerState.Duration {
+		target = m.playerState.Duration
+	}
+	m.playerState.Position = target
+	m.syncQueueScreen()
+	return m, player.SeekCmd(m.mpv, target)
+}
+
+func (m *Model) mprisPlaybackCmd() tea.Cmd {
+	if m.mprisBridge == nil {
+		return nil
+	}
+	handler := m.mprisBridge.EventHandler()
+	if handler == nil || handler.Player == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = handler.Player.OnPlayback()
+		return nil
+	}
+}
+
+func (m *Model) mprisPlayPauseCmd() tea.Cmd {
+	if m.mprisBridge == nil {
+		return nil
+	}
+	handler := m.mprisBridge.EventHandler()
+	if handler == nil || handler.Player == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = handler.Player.OnPlayPause()
+		return nil
+	}
+}
+
+func (m *Model) mprisEndedCmd() tea.Cmd {
+	if m.mprisBridge == nil {
+		return nil
+	}
+	handler := m.mprisBridge.EventHandler()
+	if handler == nil || handler.Player == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = handler.Player.OnEnded()
+		return nil
+	}
+}
+
+func (m *Model) mprisTitleCmd() tea.Cmd {
+	if m.mprisBridge == nil {
+		return nil
+	}
+	handler := m.mprisBridge.EventHandler()
+	if handler == nil || handler.Player == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = handler.Player.OnTitle()
+		return nil
+	}
+}
+
+func (m *Model) mprisPositionCmd() tea.Cmd {
+	if m.mprisBridge == nil {
+		return nil
+	}
+	now := time.Now()
+	if now.Sub(m.lastMprisEmit) < time.Second {
+		return nil
+	}
+	m.lastMprisEmit = now
+	handler := m.mprisBridge.EventHandler()
+	if handler == nil || handler.Player == nil {
+		return nil
+	}
+	pos := types.Microseconds(m.playerState.Position * 1_000_000)
+	return func() tea.Msg {
+		_ = handler.Player.OnSeek(pos)
+		return nil
+	}
+}
+
+func (m *Model) mprisVolumeCmd() tea.Cmd {
+	if m.mprisBridge == nil {
+		return nil
+	}
+	handler := m.mprisBridge.EventHandler()
+	if handler == nil || handler.Player == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = handler.Player.OnVolume()
+		return nil
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/spruce/internal/config"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/logger"
 	"github.com/Thelost77/spruce/internal/mpris"
@@ -18,8 +19,6 @@ import (
 	"github.com/Thelost77/spruce/internal/ui"
 	"github.com/Thelost77/spruce/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type musicLibrariesLoadedMsg struct {
@@ -28,12 +27,16 @@ type musicLibrariesLoadedMsg struct {
 }
 
 type Model struct {
-	screen Screen
+	screen    Screen
+	backStack []Screen
+	keys      KeyMap
 
 	loginScreen   login.Model
 	libraryScreen library.Model
 	queueScreen   queue.Model
 	palette       components.Palette
+	help          components.HelpOverlay
+	err           components.ErrorBanner
 	shuffle       bool
 
 	client *jellyfin.Client
@@ -50,7 +53,13 @@ type Model struct {
 	currentIndex int
 
 	playGeneration uint64
+	playSessionID  string
 	lastHeartbeat  time.Time
+	lastMprisEmit  time.Time
+
+	sleepDeadline   time.Time
+	sleepDuration   time.Duration
+	sleepGeneration uint64
 
 	width  int
 	height int
@@ -72,11 +81,33 @@ type MprisState struct {
 
 func New(cfg *config.Config, mpv *player.Mpv) Model {
 	styles := ui.DefaultStyles()
-	var actualCfg config.Config
+	actualCfg := config.Default()
 	if cfg != nil {
-		actualCfg = *cfg
-	} else {
-		actualCfg = config.Config{Player: config.PlayerConfig{Speed: 1.0}}
+		if cfg.Player.Speed != 0 {
+			actualCfg.Player.Speed = cfg.Player.Speed
+		}
+		if cfg.Player.SeekSeconds != 0 {
+			actualCfg.Player.SeekSeconds = cfg.Player.SeekSeconds
+		}
+		if cfg.Server.Address != "" {
+			actualCfg.Server = cfg.Server
+		}
+		if cfg.Theme.Background != "" {
+			actualCfg.Theme = cfg.Theme
+		}
+		if cfg.Keybinds.Quit != "" { actualCfg.Keybinds.Quit = cfg.Keybinds.Quit }
+		if cfg.Keybinds.PlayPause != "" { actualCfg.Keybinds.PlayPause = cfg.Keybinds.PlayPause }
+		if cfg.Keybinds.SeekForward != "" { actualCfg.Keybinds.SeekForward = cfg.Keybinds.SeekForward }
+		if cfg.Keybinds.SeekBackward != "" { actualCfg.Keybinds.SeekBackward = cfg.Keybinds.SeekBackward }
+		if cfg.Keybinds.NextInQueue != "" { actualCfg.Keybinds.NextInQueue = cfg.Keybinds.NextInQueue }
+		if cfg.Keybinds.SpeedUp != "" { actualCfg.Keybinds.SpeedUp = cfg.Keybinds.SpeedUp }
+		if cfg.Keybinds.SpeedDown != "" { actualCfg.Keybinds.SpeedDown = cfg.Keybinds.SpeedDown }
+		if cfg.Keybinds.VolumeUp != "" { actualCfg.Keybinds.VolumeUp = cfg.Keybinds.VolumeUp }
+		if cfg.Keybinds.VolumeDown != "" { actualCfg.Keybinds.VolumeDown = cfg.Keybinds.VolumeDown }
+		if cfg.Keybinds.NextChapter != "" { actualCfg.Keybinds.NextChapter = cfg.Keybinds.NextChapter }
+		if cfg.Keybinds.PrevChapter != "" { actualCfg.Keybinds.PrevChapter = cfg.Keybinds.PrevChapter }
+		if cfg.Keybinds.SleepTimer != "" { actualCfg.Keybinds.SleepTimer = cfg.Keybinds.SleepTimer }
+		if cfg.Keybinds.Back != "" { actualCfg.Keybinds.Back = cfg.Keybinds.Back }
 	}
 	var p player.Player
 	if mpv != nil {
@@ -86,14 +117,17 @@ func New(cfg *config.Config, mpv *player.Mpv) Model {
 	pal.SetStyles(styles)
 	return Model{
 		screen:        ScreenLogin,
+		keys:          DefaultKeyMap(actualCfg.Keybinds),
 		loginScreen:   login.New(styles),
 		libraryScreen: library.New(styles),
 		queueScreen:   queue.New(styles),
 		palette:       pal,
+		help:          components.NewHelpOverlay(styles),
 		cfg:           cfg,
 		mpv:           mpv,
 		mprisState:    &MprisState{},
 		playerState:   player.NewModel(p, actualCfg, styles),
+		err:           components.NewErrorBanner(styles.Error),
 		currentIndex:  -1,
 		styles:        styles,
 	}
@@ -118,10 +152,16 @@ func (m *Model) Cleanup() {
 	}
 }
 
+// screenHeight returns the available height for screen content.
 func (m Model) screenHeight() int {
 	h := m.height
+	h -= headerHeight
+	if m.err.HasError() {
+		h -= errorBannerHeight
+	}
+	h -= hintsHeight
 	if m.playerState.Title != "" {
-		h--
+		h -= playerFooterHeight
 	}
 	if h < 0 {
 		return 0
@@ -132,12 +172,15 @@ func (m Model) screenHeight() int {
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+	w := normalizeViewWidth(width)
 	sh := m.screenHeight()
-	m.loginScreen.SetSize(width, sh)
-	m.libraryScreen.SetSize(width, sh)
-	m.queueScreen.SetSize(width, sh)
-	m.playerState.SetWidth(width)
+	m.loginScreen.SetSize(w, sh)
+	m.libraryScreen.SetSize(w, sh)
+	m.queueScreen.SetSize(w, sh)
+	m.playerState.SetWidth(w)
+	m.err.SetWidth(w)
 	m.palette.SetSize(width, height)
+	m.help.SetSize(width, height)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -174,63 +217,129 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.screen != ScreenLogin {
-			if msg.String() == "ctrl+p" {
-				m.openCommandPalette()
-				return m, nil
+		if msg.String() == "ctrl+c" {
+			if m.currentIndex >= 0 && m.client != nil {
+				newM, stopCmd := m.stopPlayback()
+				return newM, tea.Batch(stopCmd, tea.Quit)
 			}
+			return m, tea.Quit
+		}
+		if m.screen != ScreenLogin {
 			isFiltering := false
 			if m.screen == ScreenLibrary && m.libraryScreen.IsFiltering() {
 				isFiltering = true
 			} else if m.screen == ScreenQueue && m.queueScreen.IsFiltering() {
 				isFiltering = true
 			}
+			if !isFiltering && key.Matches(msg, m.keys.Help) {
+				m.help.Toggle()
+				return m, nil
+			}
+			if m.help.Visible() {
+				if key.Matches(msg, m.keys.Back) {
+					m.help.Hide()
+				}
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.GlobalPalette) {
+				m.openCommandPalette()
+				return m, nil
+			}
 			if !isFiltering {
-				switch msg.String() {
-				case "q":
+				if key.Matches(msg, m.keys.Quit) {
+					if m.currentIndex >= 0 && m.client != nil {
+						newM, stopCmd := m.stopPlayback()
+						return newM, tea.Batch(stopCmd, tea.Quit)
+					}
 					return m, tea.Quit
-				case " ":
-					if m.mpv != nil {
-						return m, player.TogglePauseCmd(m.mpv, m.playerState.Playing)
-					}
-					return m, nil
-				case "n":
-					if len(m.tracks) > 0 && m.currentIndex+1 < len(m.tracks) {
-						return m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
-					}
-					return m, nil
-				case "p":
-					if m.playerState.Position > 3.0 {
-						if m.mpv != nil {
-							return m, player.SeekCmd(m.mpv, 0)
-						}
-						return m, nil
-					}
-					if len(m.tracks) > 0 && m.currentIndex-1 >= 0 {
-						return m.startPlaybackAt(m.currentIndex - 1)
-					}
-					return m, nil
-				case "s":
+				}
+				if key.Matches(msg, m.keys.Shuffle) {
 					m.shuffle = !m.shuffle
 					m.queueScreen.SetShuffle(m.shuffle)
 					return m, nil
 				}
+				if m.IsPlaying() {
+					if key.Matches(msg, m.keys.SleepTimer) {
+						return m.cycleSleepTimer()
+					}
+					if key.Matches(msg, m.playerState.SeekForwardKey()) {
+						seek := 10.0
+						if m.cfg != nil {
+							seek = float64(m.cfg.Player.SeekSeconds)
+						}
+						return m.handleSeek(seek)
+					}
+					if key.Matches(msg, m.playerState.SeekBackKey()) {
+						seek := 10.0
+						if m.cfg != nil {
+							seek = float64(m.cfg.Player.SeekSeconds)
+						}
+						return m.handleSeek(-seek)
+					}
+					if key.Matches(msg, m.keys.NextTrack) {
+						if len(m.tracks) > 0 && m.currentIndex+1 < len(m.tracks) {
+							return m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
+						}
+						return m, nil
+					}
+					if key.Matches(msg, m.keys.PrevTrack) {
+						if m.playerState.Position > 3.0 {
+							return m.handleSeek(-m.playerState.Position)
+						}
+						if len(m.tracks) > 0 && m.currentIndex-1 >= 0 {
+							return m.startPlaybackAt(m.currentIndex - 1)
+						}
+						return m, nil
+					}
+					oldSpeed := m.playerState.Speed
+					oldVol := m.playerState.Volume
+					oldPlaying := m.playerState.Playing
+					newPlayer, playerCmd := m.playerState.Update(msg)
+					m.playerState = newPlayer
+					if newPlayer.Speed != oldSpeed || newPlayer.Volume != oldVol || newPlayer.Playing != oldPlaying || playerCmd != nil {
+						m.syncQueueScreen()
+					}
+					if playerCmd != nil {
+						return m, playerCmd
+					}
+				}
 			}
 		}
 
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "tab":
-			if m.screen != ScreenLogin {
-				if m.screen == ScreenLibrary {
-					m.screen = ScreenQueue
-				} else {
-					m.screen = ScreenLibrary
+		if msg.String() == "tab" && m.screen != ScreenLogin {
+			if m.screen == ScreenLibrary {
+				m.screen = ScreenQueue
+				m.propagateSize()
+				return m, m.initScreen(ScreenQueue)
+			}
+			if m.screen == ScreenQueue {
+				m.screen = ScreenLibrary
+				m.propagateSize()
+				return m, m.initScreen(ScreenLibrary)
+			}
+		}
+		if key.Matches(msg, m.keys.Back) && m.screen != ScreenLogin {
+			if m.screen == ScreenQueue {
+				if m.queueScreen.IsFiltering() {
+					var cmd tea.Cmd
+					m.queueScreen, cmd = m.queueScreen.Update(msg)
+					return m, cmd
 				}
 				return m, nil
 			}
+			if m.screen == ScreenLibrary && (m.libraryScreen.IsFiltering() || m.libraryScreen.CurrentLevel() == library.LevelTracks) {
+				var cmd tea.Cmd
+				m.libraryScreen, cmd = m.libraryScreen.Update(msg)
+				return m, cmd
+			}
+			return m.back()
 		}
+
+	case NavigateMsg:
+		return m.navigate(msg.Target)
+
+	case BackMsg:
+		return m.back()
 
 	case login.LoginSuccessMsg:
 		logger.Info("login succeeded, setting client", "user", msg.Username)
@@ -261,14 +370,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case library.AllTracksLoadedMsg:
 		m.libraryScreen, _ = m.libraryScreen.Update(msg)
+		if msg.Err != nil {
+			return m, m.err.SetError(msg.Err)
+		}
 		return m, nil
 
 	case library.PlayTracksMsg:
 		logger.Info("received PlayTracksMsg", "count", len(msg.Tracks), "start", msg.StartIndex)
-		m.tracks = msg.Tracks
-		m.screen = ScreenQueue
+		if len(msg.Tracks) > 0 {
+			m.tracks = append(msg.Tracks, m.tracks...)
+		}
 		newM, cmd := m.startPlaybackAt(msg.StartIndex)
 		return newM, cmd
+
+	case library.AddTrackToQueueMsg:
+		logger.Info("adding track to queue", "title", msg.Track.Name)
+		wasEmpty := !m.IsPlaying()
+		m.tracks = append(m.tracks, msg.Track)
+		if wasEmpty {
+			return m.startPlaybackAt(len(m.tracks) - 1)
+		}
+		m.syncQueueScreen()
+		return m, nil
+
+	case library.AddTracksToQueueMsg:
+		logger.Info("adding tracks to queue", "count", len(msg.Tracks))
+		wasEmpty := !m.IsPlaying()
+		firstIdx := len(m.tracks)
+		m.tracks = append(m.tracks, msg.Tracks...)
+		if wasEmpty && len(m.tracks) > 0 {
+			return m.startPlaybackAt(firstIdx)
+		}
+		m.syncQueueScreen()
+		return m, nil
+
+	case SleepTimerExpiredMsg:
+		if m.IsPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
+			logger.Info("sleep timer expired, stopping playback")
+			m.sleepDeadline = time.Time{}
+			m.sleepDuration = 0
+			m.playerState.SleepRemaining = ""
+			return m.stopPlayback()
+		}
+		return m, nil
 
 	case player.PositionMsg:
 		newM, cmd := m.handlePositionMsg(msg)
@@ -278,13 +422,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		if m.mpv != nil {
 			cmds = append(cmds, player.TickCmd(m.mpv, m.playGeneration))
+			cmds = append(cmds, m.mpv.WatchEvents(m.playGeneration))
 		}
 		return m, tea.Batch(cmds...)
+
+	case player.PlayerEndMsg:
+		if msg.Generation != m.playGeneration {
+			return m, nil
+		}
+		if msg.Reason == "eof" {
+			nextIdx := m.nextIndex(m.currentIndex + 1)
+			if nextIdx < len(m.tracks) && nextIdx != m.currentIndex {
+				return m.startPlaybackAt(nextIdx)
+			}
+			return m.stopPlayback()
+		}
+		logger.Error("player ended with non-eof reason", "reason", msg.Reason, "err", msg.Err)
+		newM, cmd := m.stopPlayback()
+		if msg.Err != nil {
+			errCmd := newM.err.SetError(msg.Err)
+			return newM, tea.Batch(cmd, errCmd)
+		}
+		return newM, cmd
 
 	case player.PlayerLaunchErrMsg:
 		logger.Error("player failed to launch", "err", msg.Err)
 		newM, cmd := m.stopPlayback()
-		return newM, cmd
+		errCmd := newM.err.SetError(msg.Err)
+		return newM, tea.Batch(cmd, errCmd)
+
+	case components.ErrorDismissMsg:
+		m.err.Dismiss()
+		return m, nil
 
 	case queue.JumpQueueMsg:
 		newM, cmd := m.startPlaybackAt(msg.Index)
@@ -369,8 +538,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mpris.SetVolumeMsg:
 		m.playerState.Volume = msg.Volume
+		m.syncQueueScreen()
 		if m.mpv != nil {
 			return m, player.SetVolumeCmd(m.mpv, msg.Volume)
+		}
+
+	case mpris.SetRateMsg:
+		m.playerState.Speed = msg.Rate
+		m.syncQueueScreen()
+		if m.mpv != nil {
+			return m, player.SetSpeedCmd(m.mpv, msg.Rate)
 		}
 	}
 
@@ -383,31 +560,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ScreenQueue:
 		m.queueScreen, cmd = m.queueScreen.Update(msg)
 	}
+
 	return m, cmd
 }
 
-func (m Model) View() string {
-	var content string
-	switch m.screen {
-	case ScreenLibrary:
-		content = m.libraryScreen.View()
-	case ScreenQueue:
-		content = m.queueScreen.View()
-	default:
-		content = m.loginScreen.View()
-	}
-	if m.width == 0 {
-		if m.palette.Visible() {
-			return m.overlayPaletteModal(content)
-		}
-		return content
-	}
-	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
-	if m.palette.Visible() {
-		return m.overlayPaletteModal(placed)
-	}
-	return placed
-}
+// View is defined in render.go.
 
 // ModelAccessor implementation for mpris.Bridge.Bind
 
@@ -516,10 +673,14 @@ func (m *Model) contentSearchFunc() components.SearchFunc {
 		query = strings.ToLower(query)
 		var results []components.PaletteItem
 
-		for _, a := range m.libraryScreen.Artists() {
+		for _, a := range m.libraryScreen.Albums() {
 			if strings.Contains(strings.ToLower(a.Name), query) {
+				artist := "Unknown Artist"
+				if len(a.Artists) > 0 {
+					artist = strings.Join(a.Artists, ", ")
+				}
 				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Artist: %s", a.Name),
+					Label:  fmt.Sprintf("Album: %s — %s", a.Name, artist),
 					Action: components.ActionOpenSelected,
 					ItemID: a.ID,
 					Data:   a,
@@ -592,9 +753,9 @@ func (m Model) handlePaletteAction(action components.PaletteAction, itemID strin
 		newM, _ := m.Update(queue.QueueActionMsg{Action: "clear"})
 		return newM, nil
 	case components.ActionOpenSelected:
-		if artist, ok := data.(jellyfin.Artist); ok {
+		if album, ok := data.(jellyfin.Album); ok {
 			m.screen = ScreenLibrary
-			cmd := m.libraryScreen.SelectArtist(artist)
+			cmd := m.libraryScreen.SelectAlbum(album)
 			return m, cmd
 		}
 	case components.ActionPlayDirect:
@@ -602,62 +763,64 @@ func (m Model) handlePaletteAction(action components.PaletteAction, itemID strin
 			m.tracks = append(m.tracks, track)
 			return m.startPlaybackAt(len(m.tracks) - 1)
 		}
+	case components.ActionSleep15:
+		return m.setSleepTimer(15 * time.Minute)
+	case components.ActionSleep30:
+		return m.setSleepTimer(30 * time.Minute)
+	case components.ActionSleep45:
+		return m.setSleepTimer(45 * time.Minute)
+	case components.ActionSleep60:
+		return m.setSleepTimer(60 * time.Minute)
+	case components.ActionSleepOff:
+		return m.setSleepTimer(0)
 	}
 	return m, nil
 }
 
-func (m Model) overlayPaletteModal(content string) string {
-	overlay := m.palette.View()
-	if overlay == "" {
-		return content
-	}
-	if m.width <= 0 || m.height <= 0 {
-		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
-	}
+var sleepDurations = []time.Duration{
+	0,
+	15 * time.Minute,
+	30 * time.Minute,
+	45 * time.Minute,
+	60 * time.Minute,
+}
 
-	w := m.width
-	if w > 120 {
-		w = 120
-	}
-	baseLines := normalizeOverlayCanvas(content, w, m.height)
-	overlayLines := strings.Split(overlay, "\n")
-	overlayWidth := lipgloss.Width(overlay)
-	overlayHeight := len(overlayLines)
-	if overlayWidth <= 0 || overlayHeight == 0 {
-		return content
-	}
-
-	x := max(0, (m.width-overlayWidth)/2)
-	y := max(0, (m.height-overlayHeight)/2)
-	for i, line := range overlayLines {
-		if y+i >= len(baseLines) {
+func (m Model) cycleSleepTimer() (Model, tea.Cmd) {
+	nextIdx := 0
+	for i, d := range sleepDurations {
+		if d == m.sleepDuration {
+			nextIdx = (i + 1) % len(sleepDurations)
 			break
 		}
-		lineWidth := lipgloss.Width(line)
-		left := ansi.Truncate(baseLines[y+i], x, "")
-		right := ansi.TruncateLeft(baseLines[y+i], x+lineWidth, "")
-		baseLines[y+i] = left + line + right
 	}
-
-	return strings.Join(baseLines, "\n")
+	return m.setSleepTimer(sleepDurations[nextIdx])
 }
 
-func normalizeOverlayCanvas(content string, width, height int) []string {
-	lines := strings.Split(content, "\n")
-	if len(lines) > height {
-		lines = lines[:height]
+func (m Model) setSleepTimer(d time.Duration) (Model, tea.Cmd) {
+	m.sleepDuration = d
+	if d == 0 {
+		m.sleepDeadline = time.Time{}
+		m.playerState.SleepRemaining = ""
+		logger.Info("sleep timer disabled")
+		return m, nil
 	}
-
-	canvas := make([]string, 0, height)
-	for _, line := range lines {
-		line = ansi.Truncate(line, width, "")
-		if lipgloss.Width(line) < width {
-			line += strings.Repeat(" ", width-lipgloss.Width(line))
-		}
-		canvas = append(canvas, line)
-	}
-	for len(canvas) < height {
-		canvas = append(canvas, strings.Repeat(" ", width))
-	}
-	return canvas
+	m.sleepGeneration++
+	m.sleepDeadline = time.Now().Add(d)
+	m.playerState.SleepRemaining = formatSleepRemaining(d)
+	logger.Info("sleep timer set", "duration", d)
+	return m, sleepTimerCmd(d, m.sleepGeneration)
 }
+
+func sleepTimerCmd(d time.Duration, generation uint64) tea.Cmd {
+	return tea.Tick(d, func(_ time.Time) tea.Msg {
+		return SleepTimerExpiredMsg{Generation: generation}
+	})
+}
+
+func formatSleepRemaining(d time.Duration) string {
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	return fmt.Sprintf("%d:%02d", mins, secs)
+}
+
+

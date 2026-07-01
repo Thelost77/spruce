@@ -68,6 +68,7 @@ type IPCConnection interface {
 	Call(arguments ...interface{}) (interface{}, error)
 	Close() error
 	IsClosed() bool
+	NewEventListener() (chan *mpvipc.Event, chan struct{})
 }
 
 // ProcessStarter abstracts process spawning for testability.
@@ -261,7 +262,7 @@ func describeStreamURL(rawURL string) streamLogInfo {
 		Scheme:   parsed.Scheme,
 		Host:     parsed.Host,
 		Path:     parsed.EscapedPath(),
-		HasToken: parsed.Query().Has("token"),
+		HasToken: parsed.Query().Has("api_key") || parsed.Query().Has("ApiKey"),
 	}
 }
 

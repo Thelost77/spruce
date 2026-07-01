@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/logger"
@@ -15,8 +16,7 @@ import (
 type Level int
 
 const (
-	LevelArtists Level = iota
-	LevelAlbums
+	LevelAlbums Level = iota
 	LevelTracks
 )
 
@@ -36,6 +36,7 @@ type Model struct {
 	albums         []jellyfin.Album
 	tracks         []jellyfin.Track
 	allTracks      []jellyfin.Track
+	allTracksErr   error
 
 	loading bool
 	err     error
@@ -52,19 +53,25 @@ func New(styles ui.Styles) Model {
 	initList := func(title string) list.Model {
 		l := list.New(nil, del, 0, 0)
 		l.KeyMap.Quit.SetKeys("q")
+		l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
+		l.KeyMap.NextPage.SetKeys("pgdown", "f")
 		l.Title = title
+		l.SetShowTitle(false)
+		l.SetShowHelp(false)
 		l.SetShowStatusBar(true)
 		l.SetFilteringEnabled(true)
-		l.AdditionalFullHelpKeys = func() []key.Binding {
+			l.AdditionalFullHelpKeys = func() []key.Binding {
 			return []key.Binding{
-				key.NewBinding(key.WithKeys("h", "left", "esc"), key.WithHelp("h/esc", "back")),
+				key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc", "back")),
+				key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add track to queue")),
+				key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add album to queue")),
 			}
 		}
 		return l
 	}
 
 	return Model{
-		level:      LevelArtists,
+		level:      LevelAlbums,
 		artistList: initList("Artists"),
 		albumList:  initList("Albums"),
 		trackList:  initList("Tracks"),
@@ -86,19 +93,19 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.client != nil && m.libraryID != "" && len(m.artistList.Items()) == 0 {
-		return m.fetchArtistsCmd()
+	if m.client != nil && m.libraryID != "" && len(m.albumList.Items()) == 0 {
+		return m.fetchAllAlbumsCmd()
 	}
 	return nil
 }
 
-func (m Model) fetchArtistsCmd() tea.Cmd {
+func (m Model) fetchAllAlbumsCmd() tea.Cmd {
 	client := m.client
 	libID := m.libraryID
 	return func() tea.Msg {
-		logger.Info("fetching artists", "libraryID", libID)
-		artists, err := client.GetArtists(context.Background(), libID)
-		return ArtistsLoadedMsg{Artists: artists, Err: err}
+		logger.Info("fetching all albums", "libraryID", libID)
+		albums, err := client.GetAllAlbums(context.Background(), libID)
+		return AlbumsLoadedMsg{Albums: albums, Err: err}
 	}
 }
 
@@ -120,32 +127,35 @@ func (m Model) fetchTracksCmd(albumID string) tea.Cmd {
 	}
 }
 
+func (m Model) fetchAlbumTracksForQueueCmd(albumID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		logger.Info("fetching tracks for queue", "albumID", albumID)
+		if client == nil {
+			return nil
+		}
+		tracks, err := client.GetTracks(context.Background(), albumID)
+		if err != nil || len(tracks) == 0 {
+			return nil
+		}
+		return AddTracksToQueueMsg{Tracks: tracks}
+	}
+}
+
 func (m Model) FetchAllTracksCmd() tea.Cmd {
 	client := m.client
 	libID := m.libraryID
 	return func() tea.Msg {
 		logger.Info("fetching all library tracks", "libraryID", libID)
-		tracks, err := client.GetAllTracks(context.Background(), libID)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		tracks, err := client.GetAllTracks(ctx, libID)
 		return AllTracksLoadedMsg{Tracks: tracks, Err: err}
 	}
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case ArtistsLoadedMsg:
-		m.loading = false
-		m.err = msg.Err
-		if msg.Err == nil {
-			m.artists = msg.Artists
-			items := make([]list.Item, len(msg.Artists))
-			for i, a := range msg.Artists {
-				items[i] = artistItem{Artist: a}
-			}
-			cmd := m.artistList.SetItems(items)
-			return m, cmd
-		}
-		return m, nil
-
 	case AlbumsLoadedMsg:
 		m.loading = false
 		m.err = msg.Err
@@ -155,7 +165,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			for i, a := range msg.Albums {
 				items[i] = albumItem{Album: a}
 			}
-			m.albumList.Title = fmt.Sprintf("Albums — %s", m.selectedArtist.Name)
+			m.albumList.Title = "Albums"
 			cmd := m.albumList.SetItems(items)
 			m.level = LevelAlbums
 			return m, cmd
@@ -181,6 +191,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case AllTracksLoadedMsg:
 		if msg.Err == nil {
 			m.allTracks = msg.Tracks
+			m.allTracksErr = nil
+		} else {
+			m.allTracksErr = msg.Err
 		}
 		return m, nil
 
@@ -189,24 +202,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			break
 		}
 		switch msg.String() {
-		case "h", "left", "esc":
+		case "r":
+			if m.allTracksErr != nil {
+				m.allTracksErr = nil
+				return m, m.FetchAllTracksCmd()
+			}
+		case "esc", "left":
 			if m.level == LevelTracks {
 				m.level = LevelAlbums
 				return m, nil
-			} else if m.level == LevelAlbums {
-				m.level = LevelArtists
-				return m, nil
 			}
-			// If already at Artists level, parent handles esc/back
+			// If already at Albums level, parent handles esc/back
 
-		case "enter":
+		case "enter", "right":
 			switch m.level {
-			case LevelArtists:
-				if sel, ok := m.artistList.SelectedItem().(artistItem); ok {
-					m.selectedArtist = sel.Artist
-					m.loading = true
-					return m, m.fetchAlbumsCmd(sel.Artist.ID)
-				}
 			case LevelAlbums:
 				if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
 					m.selectedAlbum = sel.Album
@@ -216,37 +225,71 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			case LevelTracks:
 				idx := m.trackList.Index()
 				if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
+					track := m.tracks[idx]
 					return m, func() tea.Msg {
 						return PlayTracksMsg{
-							Tracks:     m.tracks,
-							StartIndex: idx,
+							Tracks:     []jellyfin.Track{track},
+							StartIndex: 0,
 						}
 					}
 				}
 			}
+		case "a", "A":
+			if m.level == LevelAlbums {
+				if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
+					return m, m.fetchAlbumTracksForQueueCmd(sel.Album.ID)
+				}
+			}
+			if msg.String() == "a" && m.level == LevelTracks {
+				idx := m.trackList.Index()
+				if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
+					track := m.tracks[idx]
+					return m, func() tea.Msg {
+						return AddTrackToQueueMsg{Track: track}
+					}
+				}
+			}
+			if msg.String() == "A" && m.level == LevelTracks && len(m.tracks) > 0 {
+				tracks := m.tracks
+				return m, func() tea.Msg {
+					return AddTracksToQueueMsg{Tracks: tracks}
+				}
+			}
+		case "L":
+			al := m.activeList()
+			before := al.GlobalIndex()
+			al.NextPage()
+			if al.GlobalIndex() == before {
+				al.GoToEnd()
+			}
+			return m, nil
+		case "H":
+			al := m.activeList()
+			before := al.GlobalIndex()
+			al.PrevPage()
+			if al.GlobalIndex() == before {
+				al.GoToStart()
+			}
+			return m, nil
 		}
 	}
 
 	var cmd tea.Cmd
 	switch m.level {
-	case LevelArtists:
-		m.artistList, cmd = m.artistList.Update(msg)
-	case LevelAlbums:
-		m.albumList, cmd = m.albumList.Update(msg)
 	case LevelTracks:
 		m.trackList, cmd = m.trackList.Update(msg)
+	default:
+		m.albumList, cmd = m.albumList.Update(msg)
 	}
 	return m, cmd
 }
 
 func (m *Model) activeList() *list.Model {
 	switch m.level {
-	case LevelAlbums:
-		return &m.albumList
 	case LevelTracks:
 		return &m.trackList
 	default:
-		return &m.artistList
+		return &m.albumList
 	}
 }
 
@@ -286,8 +329,8 @@ func (m Model) IsFiltering() bool {
 	return m.activeList().FilterState() == list.Filtering
 }
 
-func (m *Model) SelectArtist(artist jellyfin.Artist) tea.Cmd {
-	m.selectedArtist = artist
+func (m *Model) SelectAlbum(album jellyfin.Album) tea.Cmd {
+	m.selectedAlbum = album
 	m.loading = true
-	return m.fetchAlbumsCmd(artist.ID)
+	return m.fetchTracksCmd(album.ID)
 }

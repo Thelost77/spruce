@@ -18,11 +18,9 @@ func (m Model) View() string {
 	}
 
 	switch m.level {
-	case LevelAlbums:
-		return m.albumList.View()
 	case LevelTracks:
 		return m.trackList.View()
 	default:
-		return m.artistList.View()
+		return m.albumList.View()
 	}
 }

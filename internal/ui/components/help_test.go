@@ -47,7 +47,7 @@ func TestHelpOverlay_ViewContainsAllGroups(t *testing.T) {
 
 	view := h.View()
 
-	groups := []string{"Global", "Navigation", "Player", "Detail"}
+	groups := []string{"Global", "Library", "Queue", "Player"}
 	for _, g := range groups {
 		if !strings.Contains(view, g) {
 			t.Errorf("help overlay should contain group %q", g)
@@ -64,10 +64,10 @@ func TestHelpOverlay_ViewContainsKeyBindings(t *testing.T) {
 
 	bindings := []string{
 		"toggle help", "quit", "go back",
-		"move down", "move up",
+		"filter list", "open album / play track",
+		"jump to track", "clear queue",
 		"play / pause", "seek forward", "seek backward",
-		"play", "add bookmark", "delete bookmark",
-		"open library", "switch library",
+		"shuffle", "sleep timer",
 	}
 	for _, b := range bindings {
 		if !strings.Contains(view, b) {

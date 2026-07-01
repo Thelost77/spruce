@@ -5,7 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/mpris"
@@ -67,8 +70,8 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	newM, _ = m.Update(playMsg)
 	m = newM.(Model)
 
-	if m.screen != ScreenQueue {
-		t.Errorf("expected ScreenQueue during playback, got %v", m.screen)
+	if m.screen != ScreenLibrary {
+		t.Errorf("expected ScreenLibrary during playback, got %v", m.screen)
 	}
 	if !m.IsPlaying() || m.CurrentItemID() != "t-1" {
 		t.Errorf("unexpected playing state: playing=%v, id=%q", m.IsPlaying(), m.CurrentItemID())
@@ -89,20 +92,42 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 		t.Errorf("expected prev track 0, got idx=%d, id=%q", m.currentIndex, m.CurrentItemID())
 	}
 
-	// Test PositionMsg EOF error -> advances queue
-	posMsg := player.PositionMsg{Generation: m.playGeneration, Err: errors.New("EOF")}
-	newM, _ = m.Update(posMsg)
-	m = newM.(Model)
-	if m.currentIndex != 1 || m.CurrentItemID() != "t-2" {
-		t.Errorf("expected EOF to advance to track 2, got idx=%d", m.currentIndex)
-	}
-
-	// Test PositionMsg EOF on final track -> stops playback
-	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: errors.New("EOF")}
+	// Test PositionMsg.Err -> stops playback, does NOT auto-advance (fatal).
+	posMsg := player.PositionMsg{Generation: m.playGeneration, Err: errors.New("socket dead")}
 	newM, _ = m.Update(posMsg)
 	m = newM.(Model)
 	if m.IsPlaying() {
-		t.Errorf("expected playback stopped after final EOF")
+		t.Errorf("expected playback stopped on PositionMsg.Err, no advance")
+	}
+
+	// Restart at track 0 for PlayerEndMsg tests.
+	newM, _ = m.startPlaybackAt(0)
+	m = newM.(Model)
+
+	// Test PlayerEndMsg{eof} -> advances queue.
+	endMsg := player.PlayerEndMsg{Generation: m.playGeneration, Reason: "eof"}
+	newM, _ = m.Update(endMsg)
+	m = newM.(Model)
+	if m.currentIndex != 1 || m.CurrentItemID() != "t-2" {
+		t.Errorf("expected eof to advance to track 2, got idx=%d", m.currentIndex)
+	}
+
+	// Test PlayerEndMsg{eof} on final track -> stops playback.
+	endMsg = player.PlayerEndMsg{Generation: m.playGeneration, Reason: "eof"}
+	newM, _ = m.Update(endMsg)
+	m = newM.(Model)
+	if m.IsPlaying() {
+		t.Errorf("expected playback stopped after final eof")
+	}
+
+	// Test PlayerEndMsg{error} -> stops playback, no advance.
+	newM, _ = m.startPlaybackAt(0)
+	m = newM.(Model)
+	endMsg = player.PlayerEndMsg{Generation: m.playGeneration, Reason: "error", Err: errors.New("load failed")}
+	newM, _ = m.Update(endMsg)
+	m = newM.(Model)
+	if m.IsPlaying() {
+		t.Errorf("expected playback stopped on error reason, no advance")
 	}
 
 	// Test QueueActionMsg clear
@@ -179,3 +204,201 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 		t.Errorf("expected currentIndex 0 after p, got %d", m.currentIndex)
 	}
 }
+
+func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+
+	tracks := []jellyfin.Track{
+		{ID: "t-1", Name: "Track 1", RunTimeTicks: 1800000000},
+	}
+	newM, _ := m.Update(library.PlayTracksMsg{Tracks: tracks, StartIndex: 0})
+	m = newM.(Model)
+
+	if !m.IsPlaying() {
+		t.Fatal("expected playing initially")
+	}
+
+	initialVol := m.PlayerVolume()
+	// Press ']' (VolumeUp)
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = newM.(Model)
+
+	if m.PlayerVolume() == initialVol {
+		t.Errorf("expected volume to change after VolumeUp, got %d", m.PlayerVolume())
+	}
+	if m.mprisState == nil || m.mprisState.Volume != m.PlayerVolume() {
+		t.Errorf("expected mprisState volume to be synced to %d, got %v", m.PlayerVolume(), m.mprisState)
+	}
+
+	initialSpeed := m.PlayerSpeed()
+	// Press '+' (SpeedUp)
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'+'}})
+	m = newM.(Model)
+
+	if m.PlayerSpeed() == initialSpeed {
+		t.Errorf("expected speed to change after SpeedUp, got %f", m.PlayerSpeed())
+	}
+	if m.mprisState == nil || m.mprisState.Speed != m.PlayerSpeed() {
+		t.Errorf("expected mprisState speed to be synced to %f, got %v", m.PlayerSpeed(), m.mprisState)
+	}
+}
+
+func TestAppModel_MPRISCmdHelpers(t *testing.T) {
+	m := New(nil, nil)
+
+	if cmd := m.mprisPlaybackCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
+	}
+	if cmd := m.mprisPlayPauseCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
+	}
+	if cmd := m.mprisEndedCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
+	}
+	if cmd := m.mprisTitleCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
+	}
+	if cmd := m.mprisPositionCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
+	}
+	if cmd := m.mprisVolumeCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
+	}
+
+	m.mprisBridge = mpris.NewBridge(nil)
+	if cmd := m.mprisPlaybackCmd(); cmd != nil {
+		t.Errorf("expected nil cmd when server is nil, got %v", cmd)
+	}
+}
+
+func TestAppModel_SleepTimer(t *testing.T) {
+	m := New(nil, nil)
+	m.screen = ScreenLibrary
+	tracks := []jellyfin.Track{{ID: "t-1", Name: "Track One"}}
+	newM, _ := m.Update(library.PlayTracksMsg{Tracks: tracks, StartIndex: 0})
+	m = newM.(Model)
+
+	if !m.IsPlaying() {
+		t.Fatal("expected IsPlaying true")
+	}
+
+	// Press 'S' to cycle to 15m
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = newM.(Model)
+	if m.sleepDuration != 15*time.Minute || m.sleepGeneration != 1 {
+		t.Fatalf("expected 15m and gen 1, got %v gen %d", m.sleepDuration, m.sleepGeneration)
+	}
+
+	// Press 'S' to cycle to 30m
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = newM.(Model)
+	if m.sleepDuration != 30*time.Minute || m.sleepGeneration != 2 {
+		t.Fatalf("expected 30m and gen 2, got %v gen %d", m.sleepDuration, m.sleepGeneration)
+	}
+
+	// Stale expiry (gen 1) should not stop playback
+	newM, _ = m.Update(SleepTimerExpiredMsg{Generation: 1})
+	m = newM.(Model)
+	if !m.IsPlaying() {
+		t.Fatal("stale sleep timer should not stop playback")
+	}
+
+	// Active expiry (gen 2) should stop playback
+	newM, _ = m.Update(SleepTimerExpiredMsg{Generation: 2})
+	m = newM.(Model)
+	if m.IsPlaying() {
+		t.Fatal("active sleep timer should stop playback")
+	}
+
+	// Test palette action setting
+	newM, _ = m.handlePaletteAction(components.ActionSleep45, "", nil)
+	m = newM.(Model)
+	if m.sleepDuration != 45*time.Minute {
+		t.Fatalf("expected 45m from palette action, got %v", m.sleepDuration)
+	}
+}
+
+func TestAppModel_HelpOverlay(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 40)
+	m.screen = ScreenLibrary
+
+	if m.help.Visible() {
+		t.Fatal("expected help overlay initially hidden")
+	}
+
+	// Press '?' to open help overlay
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = newM.(Model)
+	if !m.help.Visible() {
+		t.Fatal("expected help overlay visible after pressing '?'")
+	}
+
+	v := m.View()
+	if !strings.Contains(v, "Keybindings") || !strings.Contains(v, "Library") {
+		t.Errorf("expected view to contain keybindings overlay, got:\n%s", v)
+	}
+
+	// Swallowing keys while help is open
+	prevScreen := m.screen
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = newM.(Model)
+	if m.screen != prevScreen || !m.help.Visible() {
+		t.Errorf("expected key to be swallowed while help overlay open")
+	}
+
+	// Press Esc to close help overlay
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = newM.(Model)
+	if m.help.Visible() {
+		t.Fatal("expected help overlay hidden after Esc")
+	}
+
+	// Press '?' again to open
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = newM.(Model)
+	if !m.help.Visible() {
+		t.Fatal("expected help overlay visible after second '?'")
+	}
+}
+
+func TestAppModel_LibraryNavigationAndHints(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+
+	if m.libraryScreen.CurrentLevel() != library.LevelAlbums {
+		t.Fatalf("expected LevelAlbums initially, got %v", m.libraryScreen.CurrentLevel())
+	}
+	hints := m.viewHints()
+	if !strings.Contains(hints, "queue album") {
+		t.Errorf("expected hints to contain 'queue album' at LevelAlbums, got: %s", hints)
+	}
+
+	// Move libraryScreen to LevelTracks via update
+	libsMsg := library.TracksLoadedMsg{Tracks: []jellyfin.Track{{ID: "t-1", Name: "Track 1"}}}
+	newLib, _ := m.libraryScreen.Update(libsMsg)
+	m.libraryScreen = newLib
+
+	if m.libraryScreen.CurrentLevel() != library.LevelTracks {
+		t.Fatalf("expected LevelTracks after TracksLoadedMsg, got %v", m.libraryScreen.CurrentLevel())
+	}
+	hints = m.viewHints()
+	if !strings.Contains(hints, "add track") {
+		t.Errorf("expected hints to contain 'add track' at LevelTracks, got: %s", hints)
+	}
+
+	// Press Esc while at LevelTracks on ScreenLibrary
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = newM.(Model)
+
+	if m.screen != ScreenLibrary {
+		t.Errorf("expected screen to remain ScreenLibrary, got %v", m.screen)
+	}
+	if m.libraryScreen.CurrentLevel() != library.LevelAlbums {
+		t.Errorf("expected libraryScreen level to pop back to LevelAlbums on Esc, got %v", m.libraryScreen.CurrentLevel())
+	}
+}
+

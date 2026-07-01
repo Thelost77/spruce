@@ -8,13 +8,17 @@ type PlayTracksMsg struct {
 	StartIndex int
 }
 
-// ArtistsLoadedMsg is received when artists are loaded from Jellyfin.
-type ArtistsLoadedMsg struct {
-	Artists []jellyfin.Artist
-	Err     error
+// AddTrackToQueueMsg signals that a single track should be appended to the queue.
+type AddTrackToQueueMsg struct {
+	Track jellyfin.Track
 }
 
-// AlbumsLoadedMsg is received when albums are loaded for an artist.
+// AddTracksToQueueMsg signals that multiple tracks should be appended to the queue.
+type AddTracksToQueueMsg struct {
+	Tracks []jellyfin.Track
+}
+
+// AlbumsLoadedMsg is received when albums are loaded from Jellyfin.
 type AlbumsLoadedMsg struct {
 	Albums []jellyfin.Album
 	Err    error

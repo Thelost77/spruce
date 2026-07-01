@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"testing"
+
+	"github.com/dexterlb/mpvipc"
 )
 
 // mockConn implements IPCConnection for testing.
@@ -17,6 +19,8 @@ type mockConn struct {
 	setErr     error
 	callErr    error
 	callResult interface{}
+	eventChan  chan *mpvipc.Event
+	stopChan   chan struct{}
 }
 
 func newMockConn() *mockConn {
@@ -71,6 +75,13 @@ func (m *mockConn) Close() error {
 
 func (m *mockConn) IsClosed() bool {
 	return m.closed
+}
+
+func (m *mockConn) NewEventListener() (chan *mpvipc.Event, chan struct{}) {
+	if m.eventChan != nil {
+		return m.eventChan, m.stopChan
+	}
+	return nil, nil
 }
 
 func newTestMpv(mc *mockConn) *Mpv {
@@ -360,7 +371,7 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 }
 
 func TestDescribeStreamURL(t *testing.T) {
-	info := describeStreamURL("https://abs.example.com/s/item/book/audio.mp3?token=secret-token")
+	info := describeStreamURL("https://abs.example.com/s/item/book/audio.mp3?api_key=secret-token")
 
 	if !info.Parsed {
 		t.Fatal("expected URL to parse")
@@ -375,7 +386,7 @@ func TestDescribeStreamURL(t *testing.T) {
 		t.Fatalf("path = %q, want /s/item/book/audio.mp3", info.Path)
 	}
 	if !info.HasToken {
-		t.Fatal("expected token query to be detected")
+		t.Fatal("expected api_key query to be detected")
 	}
 }
 
@@ -401,5 +412,48 @@ func TestGetFloatIntType(t *testing.T) {
 	}
 	if pos != 100.0 {
 		t.Fatalf("expected 100.0, got %f", pos)
+	}
+}
+
+func TestWatchEventsEndFileEOF(t *testing.T) {
+	mc := newMockConn()
+	mc.closed = true // let the watcher's close-poller exit promptly
+	events := make(chan *mpvipc.Event, 1)
+	stop := make(chan struct{})
+	mc.eventChan = events
+	mc.stopChan = stop
+	events <- &mpvipc.Event{Name: "end-file", Reason: "eof"}
+
+	m := newTestMpv(mc)
+	msg := m.WatchEvents(7)()
+	end, ok := msg.(PlayerEndMsg)
+	if !ok {
+		t.Fatalf("expected PlayerEndMsg, got %T", msg)
+	}
+	if end.Generation != 7 {
+		t.Errorf("expected generation 7, got %d", end.Generation)
+	}
+	if end.Reason != "eof" {
+		t.Errorf("expected reason eof, got %q", end.Reason)
+	}
+}
+
+func TestWatchEventsEndFileError(t *testing.T) {
+	mc := newMockConn()
+	mc.closed = true
+	events := make(chan *mpvipc.Event, 1)
+	stop := make(chan struct{})
+	mc.eventChan = events
+	mc.stopChan = stop
+	events <- &mpvipc.Event{Name: "end-file", Reason: "error"}
+
+	m := newTestMpv(mc)
+	msg := m.WatchEvents(1)()
+	end, ok := msg.(PlayerEndMsg)
+	if !ok {
+		t.Fatalf("expected PlayerEndMsg, got %T", msg)
+	}
+	if end.Reason != "error" {
+		t.Errorf("expected reason error, got %q", end.Reason)
 	}
 }

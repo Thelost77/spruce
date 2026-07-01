@@ -50,10 +50,50 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 	// Test d (RemoveQueueMsg)
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if cmd == nil {
-		t.Fatal("expected remove cmd")
+		t.Fatal("expected remove cmd for d")
 	}
 	msg = cmd()
 	if rqm, ok := msg.(RemoveQueueMsg); !ok || rqm.Index != 0 {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test x (RemoveQueueMsg)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if cmd == nil {
+		t.Fatal("expected remove cmd for x")
+	}
+	msg = cmd()
+	if rqm, ok := msg.(RemoveQueueMsg); !ok || rqm.Index != 0 {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test delete (RemoveQueueMsg)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDelete})
+	if cmd == nil {
+		t.Fatal("expected remove cmd for delete")
+	}
+	msg = cmd()
+	if rqm, ok := msg.(RemoveQueueMsg); !ok || rqm.Index != 0 {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test backspace (RemoveQueueMsg)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	if cmd == nil {
+		t.Fatal("expected remove cmd for backspace")
+	}
+	msg = cmd()
+	if rqm, ok := msg.(RemoveQueueMsg); !ok || rqm.Index != 0 {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test c (Clear action)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	if cmd == nil {
+		t.Fatal("expected clear cmd")
+	}
+	msg = cmd()
+	if qam, ok := msg.(QueueActionMsg); !ok || qam.Action != "clear" {
 		t.Errorf("unexpected msg: %+v", msg)
 	}
 
@@ -77,3 +117,4 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 		t.Errorf("unexpected msg: %+v", msg)
 	}
 }
+

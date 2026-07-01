@@ -9,11 +9,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/logger"
 )
+
+const pageLimit = 200
 
 // HTTPStatusError wraps a non-2xx HTTP response status.
 type HTTPStatusError struct {
@@ -85,8 +88,13 @@ func (c *Client) authHeader() string {
 }
 
 // StreamURL constructs the direct stream URL for an audio item.
-func (c *Client) StreamURL(itemID string) string {
-	return fmt.Sprintf("%s/Audio/%s/stream?static=true", c.baseURL, itemID)
+func (c *Client) StreamURL(itemID, playSessionID string) string {
+	q := url.Values{}
+	q.Set("static", "true")
+	q.Set("api_key", c.token)
+	q.Set("playSessionId", playSessionID)
+	q.Set("deviceId", "spruce-tui")
+	return fmt.Sprintf("%s/Audio/%s/stream?%s", c.baseURL, itemID, q.Encode())
 }
 
 // StreamHeaders returns the HTTP headers needed by mpv to authenticate direct streaming.
@@ -159,6 +167,52 @@ func (c *Client) Login(ctx context.Context, username, password string) (*AuthRes
 	return &resp, nil
 }
 
+// fetchPaged repeatedly calls /Users/{userId}/Items with increasing StartIndex
+// until TotalRecordCount is reached, accumulating Items into a slice.
+// basePath must already include the userId segment (e.g. "/Users/{id}/Items").
+// extra query values carry caller-specific params (IncludeItemTypes, Recursive,
+// ParentId, SortBy, etc.).
+func fetchPaged[T any](c *Client, ctx context.Context, basePath string, extra url.Values) ([]T, error) {
+	var acc []T
+	startIndex := 0
+	total := -1
+	for {
+		q := url.Values{}
+		for k, vs := range extra {
+			q[k] = append(q[k], vs...)
+		}
+		q.Set("StartIndex", strconv.Itoa(startIndex))
+		q.Set("Limit", strconv.Itoa(pageLimit))
+		path := basePath + "?" + q.Encode()
+		data, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var page itemsResponse[T]
+		if err := json.Unmarshal(data, &page); err != nil {
+			return nil, fmt.Errorf("decode paged response: %w", err)
+		}
+		acc = append(acc, page.Items...)
+		if total < 0 {
+			total = page.TotalRecordCount
+		}
+		startIndex += len(page.Items)
+		// Safety: stop if a page returns no items, or if we've reached the
+		// server-reported total, or if the server didn't report a total.
+		if len(page.Items) == 0 {
+			break
+		}
+		if total > 0 {
+			if startIndex >= total {
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return acc, nil
+}
+
 // GetMusicLibraries fetches all user views and returns those related to music.
 func (c *Client) GetMusicLibraries(ctx context.Context) ([]Library, error) {
 	if c.userID == "" {
@@ -175,7 +229,7 @@ func (c *Client) GetMusicLibraries(ctx context.Context) ([]Library, error) {
 	}
 	var musicLibs []Library
 	for _, lib := range resp.Items {
-		if strings.EqualFold(lib.CollectionType, "music") || lib.CollectionType == "" {
+		if strings.EqualFold(lib.CollectionType, "music") {
 			musicLibs = append(musicLibs, lib)
 		}
 	}
@@ -194,16 +248,12 @@ func (c *Client) GetArtists(ctx context.Context, libraryID string) ([]Artist, er
 	params.Set("IncludeItemTypes", "MusicArtist,Artist")
 	params.Set("Recursive", "true")
 
-	path := fmt.Sprintf("/Users/%s/Items?%s", url.PathEscape(c.userID), params.Encode())
-	data, err := c.do(ctx, http.MethodGet, path, nil)
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Artist](c, ctx, basePath, params)
 	if err != nil {
 		return nil, fmt.Errorf("get artists: %w", err)
 	}
-	var resp itemsResponse[Artist]
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("decode artists: %w", err)
-	}
-	return resp.Items, nil
+	return items, nil
 }
 
 // GetAlbums fetches music albums for a given artist.
@@ -218,16 +268,32 @@ func (c *Client) GetAlbums(ctx context.Context, artistID string) ([]Album, error
 	params.Set("IncludeItemTypes", "MusicAlbum")
 	params.Set("Recursive", "true")
 
-	path := fmt.Sprintf("/Users/%s/Items?%s", url.PathEscape(c.userID), params.Encode())
-	data, err := c.do(ctx, http.MethodGet, path, nil)
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Album](c, ctx, basePath, params)
 	if err != nil {
 		return nil, fmt.Errorf("get albums: %w", err)
 	}
-	var resp itemsResponse[Album]
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("decode albums: %w", err)
+	return items, nil
+}
+
+// GetAllAlbums fetches all music albums within a library.
+func (c *Client) GetAllAlbums(ctx context.Context, libraryID string) ([]Album, error) {
+	if c.userID == "" {
+		return nil, errors.New("user ID not set")
 	}
-	return resp.Items, nil
+	params := url.Values{}
+	params.Set("ParentId", libraryID)
+	params.Set("SortBy", "SortName")
+	params.Set("SortOrder", "Ascending")
+	params.Set("IncludeItemTypes", "MusicAlbum")
+	params.Set("Recursive", "true")
+
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Album](c, ctx, basePath, params)
+	if err != nil {
+		return nil, fmt.Errorf("get all albums: %w", err)
+	}
+	return items, nil
 }
 
 // GetTracks fetches audio tracks for a given album.
@@ -242,16 +308,12 @@ func (c *Client) GetTracks(ctx context.Context, albumID string) ([]Track, error)
 	params.Set("IncludeItemTypes", "Audio")
 	params.Set("Recursive", "true")
 
-	path := fmt.Sprintf("/Users/%s/Items?%s", url.PathEscape(c.userID), params.Encode())
-	data, err := c.do(ctx, http.MethodGet, path, nil)
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Track](c, ctx, basePath, params)
 	if err != nil {
 		return nil, fmt.Errorf("get tracks: %w", err)
 	}
-	var resp itemsResponse[Track]
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("decode tracks: %w", err)
-	}
-	return resp.Items, nil
+	return items, nil
 }
 
 // GetAllTracks fetches all audio tracks within a library.
@@ -266,49 +328,51 @@ func (c *Client) GetAllTracks(ctx context.Context, libraryID string) ([]Track, e
 	params.Set("IncludeItemTypes", "Audio")
 	params.Set("Recursive", "true")
 
-	path := fmt.Sprintf("/Users/%s/Items?%s", url.PathEscape(c.userID), params.Encode())
-	data, err := c.do(ctx, http.MethodGet, path, nil)
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Track](c, ctx, basePath, params)
 	if err != nil {
 		return nil, fmt.Errorf("get all tracks: %w", err)
 	}
-	var resp itemsResponse[Track]
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("decode all tracks: %w", err)
-	}
-	return resp.Items, nil
+	return items, nil
 }
 
 // ReportPlaybackStart reports to Jellyfin that playback has begun.
-func (c *Client) ReportPlaybackStart(ctx context.Context, itemID string) error {
+func (c *Client) ReportPlaybackStart(ctx context.Context, itemID, playSessionID string) error {
 	body := PlaybackProgressRequest{
-		ItemID:     itemID,
-		PlayMethod: "DirectStream",
-		CanSeek:    true,
+		ItemID:        itemID,
+		PlayMethod:    "DirectPlay",
+		CanSeek:       true,
+		PlaySessionId: playSessionID,
+		MediaSourceId: itemID,
 	}
 	_, err := c.do(ctx, http.MethodPost, "/Sessions/Playing", body)
 	return err
 }
 
 // ReportPlaybackProgress reports active playback position heartbeats.
-func (c *Client) ReportPlaybackProgress(ctx context.Context, itemID string, positionSeconds float64, paused bool) error {
+func (c *Client) ReportPlaybackProgress(ctx context.Context, itemID string, positionSeconds float64, paused bool, playSessionID string) error {
 	body := PlaybackProgressRequest{
-		ItemID:        itemID,
-		PositionTicks: SecondsToTicks(positionSeconds),
-		IsPaused:      paused,
-		PlayMethod:    "DirectStream",
-		CanSeek:       true,
+		ItemID:         itemID,
+		PositionTicks:  SecondsToTicks(positionSeconds),
+		IsPaused:       paused,
+		PlayMethod:     "DirectPlay",
+		CanSeek:        true,
+		PlaySessionId:  playSessionID,
+		MediaSourceId:  itemID,
 	}
 	_, err := c.do(ctx, http.MethodPost, "/Sessions/Playing/Progress", body)
 	return err
 }
 
 // ReportPlaybackStopped reports that playback has stopped.
-func (c *Client) ReportPlaybackStopped(ctx context.Context, itemID string, positionSeconds float64) error {
+func (c *Client) ReportPlaybackStopped(ctx context.Context, itemID string, positionSeconds float64, playSessionID string) error {
 	body := PlaybackProgressRequest{
-		ItemID:        itemID,
-		PositionTicks: SecondsToTicks(positionSeconds),
-		PlayMethod:    "DirectStream",
-		CanSeek:       true,
+		ItemID:         itemID,
+		PositionTicks:  SecondsToTicks(positionSeconds),
+		PlayMethod:     "DirectPlay",
+		CanSeek:        true,
+		PlaySessionId:  playSessionID,
+		MediaSourceId:  itemID,
 	}
 	_, err := c.do(ctx, http.MethodPost, "/Sessions/Playing/Stopped", body)
 	return err

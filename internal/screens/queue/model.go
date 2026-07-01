@@ -32,13 +32,18 @@ func New(styles ui.Styles) Model {
 
 	l := list.New(nil, del, 0, 0)
 	l.KeyMap.Quit.SetKeys("q")
+	l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
+	l.KeyMap.NextPage.SetKeys("pgdown", "f")
 	l.Title = "Queue / Now Playing"
+	l.SetShowTitle(false)
+	l.SetShowHelp(false)
 	l.SetShowStatusBar(true)
+	l.SetStatusBarItemName("queued", "queued")
 	l.SetFilteringEnabled(true)
 	l.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "jump to")),
-			key.NewBinding(key.WithKeys("d", "x"), key.WithHelp("d/x", "remove")),
+			key.NewBinding(key.WithKeys("d", "x", "delete", "backspace"), key.WithHelp("d/x/del", "remove")),
 			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear queue")),
 			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pause/resume")),
 			key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next")),
@@ -101,7 +106,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
 				return m, func() tea.Msg { return JumpQueueMsg{Index: idx} }
 			}
-		case "d", "x", "delete":
+		case "d", "x", "delete", "backspace":
 			idx := m.list.Index()
 			if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
 				return m, func() tea.Msg { return RemoveQueueMsg{Index: idx} }
@@ -118,8 +123,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg { return QueueActionMsg{Action: "prev"} }
 		case "s":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "shuffle"} }
-		case "esc", "h", "left":
-			return m, func() tea.Msg { return QueueActionMsg{Action: "back"} }
+		case "L":
+			before := m.list.GlobalIndex()
+			m.list.NextPage()
+			if m.list.GlobalIndex() == before {
+				m.list.GoToEnd()
+			}
+			return m, nil
+		case "H":
+			before := m.list.GlobalIndex()
+			m.list.PrevPage()
+			if m.list.GlobalIndex() == before {
+				m.list.GoToStart()
+			}
+			return m, nil
 		}
 	}
 
