@@ -35,3 +35,11 @@ type AllTracksLoadedMsg struct {
 	Tracks []jellyfin.Track
 	Err    error
 }
+
+// EditMetadataMsg requests opening the metadata editor for a track or album.
+type EditMetadataMsg struct {
+	ItemID   string
+	ItemType string // "Track" or "Album"
+	Track    *jellyfin.Track
+	Album    *jellyfin.Album
+}

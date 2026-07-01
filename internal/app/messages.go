@@ -1,11 +1,14 @@
 package app
 
+import "github.com/Thelost77/spruce/internal/jellyfin"
+
 type Screen int
 
 const (
 	ScreenLogin Screen = iota
 	ScreenLibrary
 	ScreenQueue
+	ScreenMetadataEdit
 )
 
 // SwitchScreenMsg requests switching to a specific screen.
@@ -21,6 +24,14 @@ type NavigateMsg struct {
 
 // BackMsg requests navigation back to the previous screen on the back stack.
 type BackMsg struct{}
+
+// EditMetadataMsg requests opening the metadata editor for a track or album.
+type EditMetadataMsg struct {
+	ItemID   string
+	ItemType string // "Track" or "Album"
+	Track    *jellyfin.Track
+	Album    *jellyfin.Album
+}
 
 // SleepTimerExpiredMsg fires when the sleep timer reaches zero.
 type SleepTimerExpiredMsg struct {

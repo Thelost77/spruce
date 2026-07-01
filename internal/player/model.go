@@ -24,6 +24,7 @@ type Model struct {
 	Speed          float64
 	Volume         int
 	SleepRemaining string
+	RepeatStatus   string
 
 	player Player
 	config config.PlayerConfig

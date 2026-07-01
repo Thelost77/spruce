@@ -52,12 +52,12 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 			key.WithHelp("?", "toggle help"),
 		),
 		NextTrack: key.NewBinding(
-			key.WithKeys(next, "n"),
-			key.WithHelp("n", "next track"),
+			key.WithKeys(next, "n", ">"),
+			key.WithHelp(">/n", "next track"),
 		),
 		PrevTrack: key.NewBinding(
-			key.WithKeys(prev, "p"),
-			key.WithHelp("p", "prev track"),
+			key.WithKeys(prev, "p", "<"),
+			key.WithHelp("</p", "prev track"),
 		),
 		Shuffle: key.NewBinding(
 			key.WithKeys("s"),

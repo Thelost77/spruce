@@ -86,6 +86,8 @@ func (m Model) viewScreen() string {
 		return m.libraryScreen.View()
 	case ScreenQueue:
 		return m.queueScreen.View()
+	case ScreenMetadataEdit:
+		return m.metadataEditScreen.View()
 	default:
 		return ""
 	}
@@ -105,32 +107,42 @@ func (m Model) viewHints() string {
 			parts = append(parts,
 				key("enter", "open"),
 				key("a/A", "queue album"),
+				key("S", "shuffle album"),
+				key("m", "edit meta"),
 				key("/", "search"),
 				key("esc", "back"),
 				key("tab", "queue"),
-				key("q", "quit"),
 			)
 		} else {
 			parts = append(parts,
 				key("enter", "play"),
 				key("a", "add track"),
 				key("A", "add album"),
+				key("S", "shuffle album"),
+				key("m", "edit meta"),
 				key("/", "search"),
 				key("esc", "back"),
 				key("tab", "queue"),
-				key("q", "quit"),
 			)
 		}
 	case ScreenQueue:
 		parts = append(parts,
 			key("enter", "jump"),
 			key("space", "pause"),
-			key("n", "next"),
-			key("p", "prev"),
+			key("</>", "prev/next"),
+			key("s", "shuffle"),
+			key("r/R", "repeat"),
+			key("m", "edit meta"),
 			key("d", "remove"),
+			key("/", "search"),
 			key("esc", "back"),
 			key("tab", "library"),
-			key("q", "quit"),
+		)
+	case ScreenMetadataEdit:
+		parts = append(parts,
+			key("enter", "save"),
+			key("tab", "next field"),
+			key("esc", "cancel"),
 		)
 	case ScreenLogin:
 		parts = append(parts,
@@ -141,15 +153,33 @@ func (m Model) viewHints() string {
 		return ""
 	}
 
-	if m.screen != ScreenLogin {
-		parts = append(parts, key("?", "help"))
+	if m.screen != ScreenLogin && m.screen != ScreenMetadataEdit {
+		if m.IsPlaying() {
+			parts = append(parts, key("</>", "prev/next"), key("-/+", "speed"), key("[/]", "vol"))
+		}
+		parts = append(parts, key("?", "help"), key("q", "quit"))
 	}
 
+	maxW := m.width
+	if maxW <= 0 {
+		maxW = 1000
+	}
+	var finalParts []string
+	for _, p := range parts {
+		testStr := lipgloss.JoinHorizontal(lipgloss.Center, joinWith(append(finalParts, p), sep)...)
+		if lipgloss.Width(testStr) > maxW {
+			break
+		}
+		finalParts = append(finalParts, p)
+	}
+
+	content := lipgloss.JoinHorizontal(lipgloss.Center, joinWith(finalParts, sep)...)
 	style := m.styles.StatusBar
 	if m.width > 0 {
 		style = style.Width(m.width)
+		content = ansi.Truncate(content, m.width, "")
 	}
-	return style.Render(lipgloss.JoinHorizontal(lipgloss.Center, joinWith(parts, sep)...))
+	return style.Render(content)
 }
 
 // overlayPaletteModal centers the command palette modal over the content.

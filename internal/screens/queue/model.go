@@ -46,9 +46,11 @@ func New(styles ui.Styles) Model {
 			key.NewBinding(key.WithKeys("d", "x", "delete", "backspace"), key.WithHelp("d/x/del", "remove")),
 			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear queue")),
 			key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pause/resume")),
-			key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next")),
-			key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev")),
+			key.NewBinding(key.WithKeys("n", ">"), key.WithHelp("n/>", "next")),
+			key.NewBinding(key.WithKeys("p", "<"), key.WithHelp("p/<", "prev")),
 			key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "shuffle")),
+			key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "repeat track")),
+			key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "repeat queue")),
 		}
 	}
 
@@ -58,10 +60,21 @@ func New(styles ui.Styles) Model {
 	}
 }
 
+func (m *Model) updateListSize() {
+	listH := m.height
+	if m.isPlaying && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+		listH -= 4
+	}
+	if listH < 1 {
+		listH = 1
+	}
+	m.list.SetSize(m.width, listH)
+}
+
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	m.list.SetSize(width, height)
+	m.updateListSize()
 }
 
 func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
@@ -77,6 +90,10 @@ func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
 	}
 	cmd := m.list.SetItems(items)
 	_ = cmd // SetItems returns cmd for spinner/etc if needed
+	if !m.HasActiveFilter() && currentIndex >= 0 && currentIndex < len(tracks) {
+		m.list.Select(currentIndex)
+	}
+	m.updateListSize()
 }
 
 func (m *Model) SetPlaybackState(isPlaying, isPaused bool, position, duration float64) {
@@ -84,6 +101,7 @@ func (m *Model) SetPlaybackState(isPlaying, isPaused bool, position, duration fl
 	m.isPaused = isPaused
 	m.positionSeconds = position
 	m.durationSeconds = duration
+	m.updateListSize()
 }
 
 func (m *Model) SetShuffle(isShuffle bool) {
@@ -101,15 +119,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			break
 		}
 		switch msg.String() {
+		case "esc", "left":
+			if m.HasActiveFilter() {
+				m.list.ResetFilter()
+				return m, nil
+			}
 		case "enter":
-			idx := m.list.Index()
-			if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
-				return m, func() tea.Msg { return JumpQueueMsg{Index: idx} }
+			if sel, ok := m.list.SelectedItem().(queueItem); ok {
+				m.list.ResetFilter()
+				return m, func() tea.Msg { return JumpQueueMsg{Index: sel.Index} }
 			}
 		case "d", "x", "delete", "backspace":
-			idx := m.list.Index()
-			if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
-				return m, func() tea.Msg { return RemoveQueueMsg{Index: idx} }
+			if sel, ok := m.list.SelectedItem().(queueItem); ok {
+				return m, func() tea.Msg { return RemoveQueueMsg{Index: sel.Index} }
 			}
 		case "c":
 			if len(m.tracks) > 0 {
@@ -117,12 +139,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case " ", "space":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "toggle_pause"} }
-		case "n":
+		case "n", ">":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "next"} }
-		case "p":
+		case "p", "<":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "prev"} }
 		case "s":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "shuffle"} }
+		case "m":
+			if sel, ok := m.list.SelectedItem().(queueItem); ok {
+				return m, func() tea.Msg {
+					return QueueActionMsg{Action: "edit_metadata", Index: sel.Index, TrackID: sel.Track.ID}
+				}
+			}
+		case "r":
+			if sel, ok := m.list.SelectedItem().(queueItem); ok {
+				return m, func() tea.Msg {
+					return QueueActionMsg{Action: "repeat_track", Index: sel.Index, TrackID: sel.Track.ID}
+				}
+			}
+		case "R":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "repeat_queue"} }
 		case "L":
 			before := m.list.GlobalIndex()
 			m.list.NextPage()
@@ -155,4 +191,8 @@ func (m Model) Tracks() []jellyfin.Track {
 
 func (m Model) IsFiltering() bool {
 	return m.list.FilterState() == list.Filtering
+}
+
+func (m Model) HasActiveFilter() bool {
+	return m.list.FilterValue() != "" || m.list.FilterState() == list.FilterApplied
 }

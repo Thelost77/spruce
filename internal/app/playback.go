@@ -148,7 +148,7 @@ func authorsEqual(a, b []string) bool {
 }
 
 func (m *Model) syncQueueScreen() {
-	if !m.queueScreen.IsFiltering() {
+	if !m.queueScreen.IsFiltering() && !m.queueScreen.HasActiveFilter() {
 		m.queueScreen.SetQueue(m.tracks, m.currentIndex)
 	}
 	m.queueScreen.SetPlaybackState(

@@ -316,6 +316,24 @@ func (c *Client) GetTracks(ctx context.Context, albumID string) ([]Track, error)
 	return items, nil
 }
 
+// GetTrack fetches a single track by item ID.
+func (c *Client) GetTrack(ctx context.Context, itemID string) (*Track, error) {
+	if c.userID == "" {
+		return nil, errors.New("user ID not set")
+	}
+	params := url.Values{}
+	params.Set("Ids", itemID)
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Track](c, ctx, basePath, params)
+	if err != nil {
+		return nil, fmt.Errorf("get track: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("track not found")
+	}
+	return &items[0], nil
+}
+
 // GetAllTracks fetches all audio tracks within a library.
 func (c *Client) GetAllTracks(ctx context.Context, libraryID string) ([]Track, error) {
 	if c.userID == "" {
@@ -375,5 +393,45 @@ func (c *Client) ReportPlaybackStopped(ctx context.Context, itemID string, posit
 		MediaSourceId:  itemID,
 	}
 	_, err := c.do(ctx, http.MethodPost, "/Sessions/Playing/Stopped", body)
+	return err
+}
+
+// UpdateItem updates item metadata in Jellyfin via POST /Items/{itemId}.
+func (c *Client) UpdateItem(ctx context.Context, itemID string, req UpdateItemRequest) error {
+	if c.userID == "" {
+		return errors.New("user ID not set")
+	}
+	getPath := fmt.Sprintf("/Users/%s/Items/%s", url.PathEscape(c.userID), url.PathEscape(itemID))
+	data, err := c.do(ctx, http.MethodGet, getPath, nil)
+	if err != nil {
+		return fmt.Errorf("fetch existing item: %w", err)
+	}
+
+	var itemData map[string]any
+	if err := json.Unmarshal(data, &itemData); err != nil {
+		return fmt.Errorf("decode existing item: %w", err)
+	}
+
+	if req.Name != "" {
+		itemData["Name"] = req.Name
+	}
+	if req.Album != "" {
+		itemData["Album"] = req.Album
+	}
+	if req.Artists != nil {
+		itemData["Artists"] = req.Artists
+	}
+	if req.IndexNumber != nil {
+		itemData["IndexNumber"] = *req.IndexNumber
+	}
+	if req.ParentIndexNumber != nil {
+		itemData["ParentIndexNumber"] = *req.ParentIndexNumber
+	}
+	if req.ProductionYear != nil {
+		itemData["ProductionYear"] = *req.ProductionYear
+	}
+
+	postPath := fmt.Sprintf("/Items/%s", url.PathEscape(itemID))
+	_, err = c.do(ctx, http.MethodPost, postPath, itemData)
 	return err
 }

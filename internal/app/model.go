@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/Thelost77/spruce/internal/player"
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/screens/login"
+	"github.com/Thelost77/spruce/internal/screens/metadataedit"
 	"github.com/Thelost77/spruce/internal/screens/queue"
 	"github.com/Thelost77/spruce/internal/ui"
 	"github.com/Thelost77/spruce/internal/ui/components"
@@ -31,13 +33,15 @@ type Model struct {
 	backStack []Screen
 	keys      KeyMap
 
-	loginScreen   login.Model
-	libraryScreen library.Model
-	queueScreen   queue.Model
-	palette       components.Palette
+	loginScreen        login.Model
+	libraryScreen      library.Model
+	queueScreen        queue.Model
+	metadataEditScreen metadataedit.Model
+	palette            components.Palette
 	help          components.HelpOverlay
 	err           components.ErrorBanner
-	shuffle       bool
+	repeatTrackID string
+	repeatQueue   bool
 
 	client *jellyfin.Client
 	cfg    *config.Config
@@ -224,6 +228,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+		if m.screen == ScreenMetadataEdit {
+			var cmd tea.Cmd
+			m.metadataEditScreen, cmd = m.metadataEditScreen.Update(msg)
+			return m, cmd
+		}
 		if m.screen != ScreenLogin {
 			isFiltering := false
 			if m.screen == ScreenLibrary && m.libraryScreen.IsFiltering() {
@@ -252,11 +261,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return newM, tea.Batch(stopCmd, tea.Quit)
 					}
 					return m, tea.Quit
-				}
-				if key.Matches(msg, m.keys.Shuffle) {
-					m.shuffle = !m.shuffle
-					m.queueScreen.SetShuffle(m.shuffle)
-					return m, nil
 				}
 				if m.IsPlaying() {
 					if key.Matches(msg, m.keys.SleepTimer) {
@@ -320,14 +324,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, m.keys.Back) && m.screen != ScreenLogin {
 			if m.screen == ScreenQueue {
-				if m.queueScreen.IsFiltering() {
+				if m.queueScreen.IsFiltering() || m.queueScreen.HasActiveFilter() {
 					var cmd tea.Cmd
 					m.queueScreen, cmd = m.queueScreen.Update(msg)
 					return m, cmd
 				}
 				return m, nil
 			}
-			if m.screen == ScreenLibrary && (m.libraryScreen.IsFiltering() || m.libraryScreen.CurrentLevel() == library.LevelTracks) {
+			if m.screen == ScreenLibrary && (m.libraryScreen.IsFiltering() || m.libraryScreen.HasActiveFilter() || m.libraryScreen.CurrentLevel() == library.LevelTracks) {
 				var cmd tea.Cmd
 				m.libraryScreen, cmd = m.libraryScreen.Update(msg)
 				return m, cmd
@@ -338,7 +342,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case NavigateMsg:
 		return m.navigate(msg.Target)
 
-	case BackMsg:
+	case metadataedit.SavedMsg:
+		var cmd tea.Cmd
+		m.metadataEditScreen, cmd = m.metadataEditScreen.Update(msg)
+		if msg.Err == nil {
+			for i := range m.tracks {
+				if m.tracks[i].ID == msg.ItemID {
+					if msg.Req.Name != "" {
+						m.tracks[i].Name = msg.Req.Name
+					}
+					if msg.Req.Artists != nil {
+						m.tracks[i].Artists = msg.Req.Artists
+					}
+					if msg.Req.Album != "" {
+						m.tracks[i].Album = msg.Req.Album
+					}
+					if i == m.currentIndex {
+						m.playerState.Title = m.tracks[i].Name
+					}
+				}
+			}
+			m.libraryScreen.PatchTrack(msg.ItemID, msg.Req.Name, msg.Req.Artists, msg.Req.Album)
+			m.syncQueueScreen()
+		}
+		return m, cmd
+
+	case BackMsg, metadataedit.BackMsg:
 		return m.back()
 
 	case login.LoginSuccessMsg:
@@ -404,6 +433,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncQueueScreen()
 		return m, nil
 
+	case library.AddShuffledTracksToQueueMsg:
+		logger.Info("adding shuffled tracks to queue", "count", len(msg.Tracks))
+		wasEmpty := !m.IsPlaying()
+		firstIdx := len(m.tracks)
+		shuffled := make([]jellyfin.Track, len(msg.Tracks))
+		copy(shuffled, msg.Tracks)
+		rand.Shuffle(len(shuffled), func(i, j int) {
+			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		})
+		m.tracks = append(m.tracks, shuffled...)
+		if wasEmpty && len(m.tracks) > 0 {
+			return m.startPlaybackAt(firstIdx)
+		}
+		m.syncQueueScreen()
+		return m, nil
+
+	case library.EditMetadataMsg:
+		m.metadataEditScreen = metadataedit.New(m.styles, m.client, msg.ItemID, msg.ItemType, msg.Track, msg.Album)
+		m.metadataEditScreen.SetSize(m.width, m.screenHeight())
+		return m.navigate(ScreenMetadataEdit)
+
 	case SleepTimerExpiredMsg:
 		if m.IsPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
 			logger.Info("sleep timer expired, stopping playback")
@@ -431,9 +481,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Reason == "eof" {
-			nextIdx := m.nextIndex(m.currentIndex + 1)
-			if nextIdx < len(m.tracks) && nextIdx != m.currentIndex {
+			if m.repeatTrackID != "" {
+				for idx, t := range m.tracks {
+					if t.ID == m.repeatTrackID {
+						return m.startPlaybackAt(idx)
+					}
+				}
+			}
+			nextIdx := m.currentIndex + 1
+			if nextIdx < len(m.tracks) {
 				return m.startPlaybackAt(nextIdx)
+			}
+			if m.repeatQueue && len(m.tracks) > 0 {
+				return m.startPlaybackAt(0)
 			}
 			return m.stopPlayback()
 		}
@@ -461,6 +521,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queue.RemoveQueueMsg:
 		if msg.Index >= 0 && msg.Index < len(m.tracks) {
+			if m.tracks[msg.Index].ID == m.repeatTrackID {
+				m.repeatTrackID = ""
+				m.playerState.RepeatStatus = ""
+			}
 			m.tracks = append(m.tracks[:msg.Index], m.tracks[msg.Index+1:]...)
 			if m.currentIndex == msg.Index {
 				if len(m.tracks) == 0 {
@@ -481,6 +545,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queue.QueueActionMsg:
 		switch msg.Action {
+		case "edit_metadata":
+			if msg.Index >= 0 && msg.Index < len(m.tracks) {
+				trk := m.tracks[msg.Index]
+				m.metadataEditScreen = metadataedit.New(m.styles, m.client, trk.ID, "Track", &trk, nil)
+				m.metadataEditScreen.SetSize(m.width, m.screenHeight())
+				return m.navigate(ScreenMetadataEdit)
+			}
 		case "toggle_pause":
 			m.playerState.Playing = !m.playerState.Playing
 			m.syncQueueScreen()
@@ -500,10 +571,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return newM, cmd
 			}
 		case "shuffle":
-			m.shuffle = !m.shuffle
-			m.queueScreen.SetShuffle(m.shuffle)
+			if len(m.tracks) > 1 {
+				currentID := ""
+				if m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+					currentID = m.tracks[m.currentIndex].ID
+				}
+				rand.Shuffle(len(m.tracks), func(i, j int) {
+					m.tracks[i], m.tracks[j] = m.tracks[j], m.tracks[i]
+				})
+				if currentID != "" {
+					for idx, t := range m.tracks {
+						if t.ID == currentID {
+							m.currentIndex = idx
+							break
+						}
+					}
+				}
+				m.syncQueueScreen()
+			}
+			return m, nil
+		case "repeat_track":
+			if msg.TrackID != "" {
+				if m.repeatTrackID == msg.TrackID {
+					m.repeatTrackID = ""
+					m.playerState.RepeatStatus = ""
+				} else {
+					m.repeatTrackID = msg.TrackID
+					m.repeatQueue = false
+					m.playerState.RepeatStatus = "🔂 Track"
+				}
+				m.syncQueueScreen()
+			}
+			return m, nil
+		case "repeat_queue":
+			m.repeatQueue = !m.repeatQueue
+			if m.repeatQueue {
+				m.repeatTrackID = ""
+				m.playerState.RepeatStatus = "🔁 Queue"
+			} else {
+				m.playerState.RepeatStatus = ""
+			}
+			m.syncQueueScreen()
 			return m, nil
 		case "clear":
+			m.repeatTrackID = ""
+			m.repeatQueue = false
+			m.playerState.RepeatStatus = ""
 			m.tracks = nil
 			m.currentIndex = -1
 			newM, cmd := m.stopPlayback()
@@ -559,6 +672,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
 	case ScreenQueue:
 		m.queueScreen, cmd = m.queueScreen.Update(msg)
+	case ScreenMetadataEdit:
+		m.metadataEditScreen, cmd = m.metadataEditScreen.Update(msg)
 	}
 
 	return m, cmd
@@ -639,16 +754,15 @@ func (a mprisStateAccessor) PlayerVolume() int        { if a.s != nil { return a
 func (a mprisStateAccessor) QueueLength() int         { if a.s != nil { return a.s.QueueLen }; return 0 }
 
 func (m Model) nextIndex(defaultNext int) int {
-	if m.shuffle && len(m.tracks) > 1 {
-		for i := 0; i < 10; i++ {
-			idx := int(time.Now().UnixNano()) % len(m.tracks)
-			if idx < 0 {
-				idx = -idx
-			}
-			if idx != m.currentIndex {
+	if m.repeatTrackID != "" {
+		for idx, t := range m.tracks {
+			if t.ID == m.repeatTrackID {
 				return idx
 			}
 		}
+	}
+	if defaultNext >= len(m.tracks) && m.repeatQueue && len(m.tracks) > 0 {
+		return 0
 	}
 	return defaultNext
 }

@@ -92,3 +92,14 @@ func SecondsToTicks(seconds float64) int64 {
 	}
 	return int64(seconds * 1e7)
 }
+
+// UpdateItemRequest represents fields sent to POST /Items/{itemId} to update metadata.
+type UpdateItemRequest struct {
+	ID                string   `json:"Id"`
+	Name              string   `json:"Name,omitempty"`
+	Album             string   `json:"Album,omitempty"`
+	Artists           []string `json:"Artists,omitempty"`
+	IndexNumber       *int     `json:"IndexNumber,omitempty"`
+	ParentIndexNumber *int     `json:"ParentIndexNumber,omitempty"`
+	ProductionYear    *int     `json:"ProductionYear,omitempty"`
+}

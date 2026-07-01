@@ -31,6 +31,7 @@ func (m *Model) propagateSize() {
 	m.loginScreen.SetSize(w, sh)
 	m.libraryScreen.SetSize(w, sh)
 	m.queueScreen.SetSize(w, sh)
+	m.metadataEditScreen.SetSize(w, sh)
 	m.palette.SetSize(m.width, m.height)
 }
 
@@ -43,6 +44,8 @@ func (m Model) initScreen(s Screen) tea.Cmd {
 		return m.libraryScreen.Init()
 	case ScreenQueue:
 		return m.queueScreen.Init()
+	case ScreenMetadataEdit:
+		return m.metadataEditScreen.Init()
 	}
 	return nil
 }

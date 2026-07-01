@@ -1,3 +1,6 @@
-1. Zapętlanie konkretnego utworu
-2. Jak się w home view robi search to nie sposobu, żeby go enterem wyczyścić
-3. Lepsze help options brakuje chociażby [/] oraz -/+
+- [x] 1. Zapętlanie konkretnego utworu ('r' w kolejce zapętla utwór pod kursorem, 'R' zapętla całą kolejkę)
+- [x] 2. Wyszukiwanie: Esc wyczyszcza aktywny filtr przed powrotem do poprzedniego widoku
+- [x] 3. Lepsze help options: dynamiczne podpowiedzi w pasku statusu (w tym -/+ dla prędkości, [/] dla głośności podczas odtwarzania)
+- [x] 4. Dodanie całego albumu do kolejki w losowej kolejności ('S' na albumie lub na liście utworów)
+- [x] 5. Edytor metadanych (klawisz 'm' na utworze lub albumie otwierający dedykowany widok edycji metadanych w Jellyfin)
+- [x] 6. Przejście do następnego / poprzedniego utworu pod klawiszami </>

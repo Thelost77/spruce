@@ -27,6 +27,9 @@ func (m Model) View() string {
 	if m.Volume != 100 {
 		extras += fmt.Sprintf("  Vol:%d%%", m.Volume)
 	}
+	if m.RepeatStatus != "" {
+		extras += fmt.Sprintf("  %s", m.RepeatStatus)
+	}
 	if m.SleepRemaining != "" {
 		extras += fmt.Sprintf("  Sleep:%s", m.SleepRemaining)
 	}

@@ -172,4 +172,9 @@ func TestLibraryModel_Actions(t *testing.T) {
 	if !ok || len(addAll.Tracks) != 2 {
 		t.Fatalf("expected AddTracksToQueueMsg with 2 tracks, got %T %+v", cmd(), addAll)
 	}
+
+	// Test Esc resets filter when active
+	if m.HasActiveFilter() {
+		t.Fatal("expected no active filter initially")
+	}
 }

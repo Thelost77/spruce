@@ -172,14 +172,14 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 	}
 	m.palette.Close()
 
-	// Test global key s (shuffle toggle)
-	if m.shuffle {
-		t.Error("expected shuffle false initially")
+	// Test repeat queue action
+	if m.repeatQueue {
+		t.Error("expected repeatQueue false initially")
 	}
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	newM, _ = m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
 	m = newM.(Model)
-	if !m.shuffle {
-		t.Error("expected shuffle true after pressing s")
+	if !m.repeatQueue {
+		t.Error("expected repeatQueue true after repeat_queue action")
 	}
 
 	// Setup tracks to test global n / p

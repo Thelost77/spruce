@@ -65,6 +65,7 @@ func New(styles ui.Styles) Model {
 				key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc", "back")),
 				key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add track to queue")),
 				key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add album to queue")),
+				key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "add album shuffled")),
 			}
 		}
 		return l
@@ -127,6 +128,10 @@ func (m Model) fetchTracksCmd(albumID string) tea.Cmd {
 	}
 }
 
+type AddShuffledTracksToQueueMsg struct {
+	Tracks []jellyfin.Track
+}
+
 func (m Model) fetchAlbumTracksForQueueCmd(albumID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
@@ -142,6 +147,21 @@ func (m Model) fetchAlbumTracksForQueueCmd(albumID string) tea.Cmd {
 	}
 }
 
+func (m Model) fetchAlbumTracksForShuffledQueueCmd(albumID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		logger.Info("fetching shuffled tracks for queue", "albumID", albumID)
+		if client == nil {
+			return nil
+		}
+		tracks, err := client.GetTracks(context.Background(), albumID)
+		if err != nil || len(tracks) == 0 {
+			return nil
+		}
+		return AddShuffledTracksToQueueMsg{Tracks: tracks}
+	}
+}
+
 func (m Model) FetchAllTracksCmd() tea.Cmd {
 	client := m.client
 	libID := m.libraryID
@@ -151,6 +171,57 @@ func (m Model) FetchAllTracksCmd() tea.Cmd {
 		defer cancel()
 		tracks, err := client.GetAllTracks(ctx, libID)
 		return AllTracksLoadedMsg{Tracks: tracks, Err: err}
+	}
+}
+
+// RefreshCmd re-fetches the current level items from Jellyfin.
+func (m *Model) RefreshCmd() tea.Cmd {
+	m.loading = true
+	if m.allTracks != nil {
+		return m.FetchAllTracksCmd()
+	}
+	switch m.level {
+	case LevelAlbums:
+		return m.fetchAllAlbumsCmd()
+	case LevelTracks:
+		if m.selectedAlbum.ID != "" {
+			return m.fetchTracksCmd(m.selectedAlbum.ID)
+		}
+		return m.FetchAllTracksCmd()
+	}
+	return nil
+}
+
+// PatchTrack updates a single track in all in-memory lists without any network call.
+func (m *Model) PatchTrack(id, name string, artists []string, album string) {
+	patch := func(t *jellyfin.Track) {
+		if name != "" {
+			t.Name = name
+		}
+		if artists != nil {
+			t.Artists = artists
+		}
+		if album != "" {
+			t.Album = album
+		}
+	}
+	for i := range m.tracks {
+		if m.tracks[i].ID == id {
+			patch(&m.tracks[i])
+			items := m.trackList.Items()
+			for j, item := range items {
+				if ti, ok := item.(trackItem); ok && ti.Track.ID == id {
+					patch(&ti.Track)
+					items[j] = ti
+				}
+			}
+			m.trackList.SetItems(items)
+		}
+	}
+	for i := range m.allTracks {
+		if m.allTracks[i].ID == id {
+			patch(&m.allTracks[i])
+		}
 	}
 }
 
@@ -202,12 +273,34 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			break
 		}
 		switch msg.String() {
+		case "m":
+			if m.level == LevelAlbums {
+				if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
+					alb := sel.Album
+					return m, func() tea.Msg {
+						return EditMetadataMsg{ItemID: alb.ID, ItemType: "Album", Album: &alb}
+					}
+				}
+			} else if m.level == LevelTracks {
+				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
+					trk := sel.Track
+					return m, func() tea.Msg {
+						return EditMetadataMsg{ItemID: trk.ID, ItemType: "Track", Track: &trk}
+					}
+				}
+			}
 		case "r":
 			if m.allTracksErr != nil {
 				m.allTracksErr = nil
 				return m, m.FetchAllTracksCmd()
 			}
 		case "esc", "left":
+			if m.HasActiveFilter() {
+				if al := m.activeList(); al != nil {
+					al.ResetFilter()
+				}
+				return m, nil
+			}
 			if m.level == LevelTracks {
 				m.level = LevelAlbums
 				return m, nil
@@ -223,9 +316,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return m, m.fetchTracksCmd(sel.Album.ID)
 				}
 			case LevelTracks:
-				idx := m.trackList.Index()
-				if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
-					track := m.tracks[idx]
+				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
+					track := sel.Track
+					m.trackList.ResetFilter()
 					return m, func() tea.Msg {
 						return PlayTracksMsg{
 							Tracks:     []jellyfin.Track{track},
@@ -234,24 +327,29 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					}
 				}
 			}
-		case "a", "A":
+		case "a", "A", "S":
 			if m.level == LevelAlbums {
 				if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
+					if msg.String() == "S" {
+						return m, m.fetchAlbumTracksForShuffledQueueCmd(sel.Album.ID)
+					}
 					return m, m.fetchAlbumTracksForQueueCmd(sel.Album.ID)
 				}
 			}
 			if msg.String() == "a" && m.level == LevelTracks {
-				idx := m.trackList.Index()
-				if len(m.tracks) > 0 && idx >= 0 && idx < len(m.tracks) {
-					track := m.tracks[idx]
+				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
+					track := sel.Track
 					return m, func() tea.Msg {
 						return AddTrackToQueueMsg{Track: track}
 					}
 				}
 			}
-			if msg.String() == "A" && m.level == LevelTracks && len(m.tracks) > 0 {
+			if (msg.String() == "A" || msg.String() == "S") && m.level == LevelTracks && len(m.tracks) > 0 {
 				tracks := m.tracks
 				return m, func() tea.Msg {
+					if msg.String() == "S" {
+						return AddShuffledTracksToQueueMsg{Tracks: tracks}
+					}
 					return AddTracksToQueueMsg{Tracks: tracks}
 				}
 			}
@@ -327,6 +425,10 @@ func (m *Model) SetAllTracks(tracks []jellyfin.Track) {
 
 func (m Model) IsFiltering() bool {
 	return m.activeList().FilterState() == list.Filtering
+}
+
+func (m Model) HasActiveFilter() bool {
+	return m.activeList().FilterValue() != "" || m.activeList().FilterState() == list.FilterApplied
 }
 
 func (m *Model) SelectAlbum(album jellyfin.Album) tea.Cmd {
