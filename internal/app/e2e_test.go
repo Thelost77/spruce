@@ -445,8 +445,11 @@ func TestE2E(t *testing.T) {
 		if itemsReqs < 2 {
 			t.Errorf("expected >= 2 GET /Users/usr-1/Items requests for pagination, got %d", itemsReqs)
 		}
-		if all[0].ID != "trk-0" || all[249].ID != "trk-249" {
-			t.Errorf("pagination order wrong: first=%q last=%q", all[0].ID, all[len(all)-1].ID)
+		for i := 1; i < len(all); i++ {
+			if strings.ToLower(all[i-1].Name) > strings.ToLower(all[i].Name) {
+				t.Errorf("tracks not sorted alphabetically at %d: %q before %q", i, all[i-1].Name, all[i].Name)
+				break
+			}
 		}
 	})
 

@@ -3,6 +3,8 @@ package library
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
@@ -60,7 +62,7 @@ func New(styles ui.Styles) Model {
 		l.SetShowHelp(false)
 		l.SetShowStatusBar(true)
 		l.SetFilteringEnabled(true)
-			l.AdditionalFullHelpKeys = func() []key.Binding {
+		l.AdditionalFullHelpKeys = func() []key.Binding {
 			return []key.Binding{
 				key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc", "back")),
 				key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add track to queue")),
@@ -231,9 +233,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
-			m.albums = msg.Albums
-			items := make([]list.Item, len(msg.Albums))
-			for i, a := range msg.Albums {
+			m.albums = append([]jellyfin.Album(nil), msg.Albums...)
+			slices.SortFunc(m.albums, func(a, b jellyfin.Album) int {
+				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			})
+			items := make([]list.Item, len(m.albums))
+			for i, a := range m.albums {
 				items[i] = albumItem{Album: a}
 			}
 			m.albumList.Title = "Albums"
@@ -247,9 +252,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
-			m.tracks = msg.Tracks
-			items := make([]list.Item, len(msg.Tracks))
-			for i, t := range msg.Tracks {
+			m.tracks = append([]jellyfin.Track(nil), msg.Tracks...)
+			slices.SortFunc(m.tracks, func(a, b jellyfin.Track) int {
+				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			})
+			items := make([]list.Item, len(m.tracks))
+			for i, t := range m.tracks {
 				items[i] = trackItem{Track: t}
 			}
 			m.trackList.Title = fmt.Sprintf("Tracks — %s", m.selectedAlbum.Name)
@@ -261,7 +269,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case AllTracksLoadedMsg:
 		if msg.Err == nil {
-			m.allTracks = msg.Tracks
+			m.allTracks = append([]jellyfin.Track(nil), msg.Tracks...)
+			slices.SortFunc(m.allTracks, func(a, b jellyfin.Track) int {
+				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			})
 			m.allTracksErr = nil
 		} else {
 			m.allTracksErr = msg.Err

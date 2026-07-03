@@ -178,3 +178,48 @@ func TestLibraryModel_Actions(t *testing.T) {
 		t.Fatal("expected no active filter initially")
 	}
 }
+
+func TestLibraryModel_SortsLibraryItemsAlphabetically(t *testing.T) {
+	m := New(ui.DefaultStyles())
+
+	m, _ = m.Update(AlbumsLoadedMsg{Albums: []jellyfin.Album{
+		{ID: "z", Name: "Zebra"},
+		{ID: "a", Name: "alpha"},
+		{ID: "b", Name: "Beta"},
+	}})
+
+	gotAlbums := m.Albums()
+	if got := []string{gotAlbums[0].Name, gotAlbums[1].Name, gotAlbums[2].Name}; got[0] != "alpha" || got[1] != "Beta" || got[2] != "Zebra" {
+		t.Fatalf("albums sorted = %v, want [alpha Beta Zebra]", got)
+	}
+	firstItem, ok := m.albumList.Items()[0].(albumItem)
+	if !ok || firstItem.Album.Name != "alpha" {
+		t.Fatalf("first visible album = %#v, want alpha", m.albumList.Items()[0])
+	}
+
+	m, _ = m.Update(AllTracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "z", Name: "Zebra"},
+		{ID: "a", Name: "alpha"},
+		{ID: "b", Name: "Beta"},
+	}})
+
+	gotTracks := m.AllTracks()
+	if got := []string{gotTracks[0].Name, gotTracks[1].Name, gotTracks[2].Name}; got[0] != "alpha" || got[1] != "Beta" || got[2] != "Zebra" {
+		t.Fatalf("all tracks sorted = %v, want [alpha Beta Zebra]", got)
+	}
+
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "z", Name: "Zebra"},
+		{ID: "a", Name: "alpha"},
+		{ID: "b", Name: "Beta"},
+	}})
+
+	gotAlbumTracks := m.Tracks()
+	if got := []string{gotAlbumTracks[0].Name, gotAlbumTracks[1].Name, gotAlbumTracks[2].Name}; got[0] != "alpha" || got[1] != "Beta" || got[2] != "Zebra" {
+		t.Fatalf("album tracks sorted = %v, want [alpha Beta Zebra]", got)
+	}
+	firstTrackItem, ok := m.trackList.Items()[0].(trackItem)
+	if !ok || firstTrackItem.Track.Name != "alpha" {
+		t.Fatalf("first visible track = %#v, want alpha", m.trackList.Items()[0])
+	}
+}
