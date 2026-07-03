@@ -473,6 +473,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mpv != nil {
 			cmds = append(cmds, player.TickCmd(m.mpv, m.playGeneration))
 			cmds = append(cmds, m.mpv.WatchEvents(m.playGeneration))
+			cmds = append(cmds, player.SetVolumeCmd(m.mpv, m.playerState.Volume))
+			cmds = append(cmds, player.SetSpeedCmd(m.mpv, m.playerState.Speed))
 		}
 		return m, tea.Batch(cmds...)
 

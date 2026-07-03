@@ -100,7 +100,7 @@ type PlayerQuitMsg struct{}
 // LaunchCmd spawns mpv and connects via IPC. If paused is true, mpv starts paused.
 // httpHeaders are passed to mpv via --http-header-fields.
 // Returns PlayerReadyMsg on success.
-func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string) tea.Cmd {
+func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, volume int) tea.Cmd {
 	return func() tea.Msg {
 		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
 		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("spruce-mpv-%d.sock", os.Getpid()))
@@ -108,7 +108,7 @@ func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders
 		_ = os.Remove(socketPath)
 
 		startStr := fmt.Sprintf("%f", startTime)
-		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders); err != nil {
+		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders, volume); err != nil {
 			logger.Error("mpv launch failed", "err", err)
 			return PlayerLaunchErrMsg{Err: err}
 		}
