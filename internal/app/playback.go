@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/quarckster/go-mpris-server/pkg/types"
@@ -90,6 +91,13 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if msg.Err != nil {
+		if isMpvPropertyUnavailable(msg.Err) {
+			logger.Warn("player position poll temporarily unavailable", "err", msg.Err)
+			if m.mpv != nil {
+				return m, player.TickCmd(m.mpv, m.playGeneration)
+			}
+			return m, nil
+		}
 		logger.Error("player position poll failed (fatal)", "err", msg.Err)
 		// Do NOT auto-advance — this is a fatal load/socket error, not EOF.
 		// EOF is delivered via PlayerEndMsg{Reason:"eof"}.
@@ -133,6 +141,10 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func isMpvPropertyUnavailable(err error) bool {
+	return strings.Contains(err.Error(), "property unavailable")
 }
 
 func authorsEqual(a, b []string) bool {

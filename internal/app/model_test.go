@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/mpris"
 	"github.com/Thelost77/spruce/internal/player"
@@ -98,6 +97,16 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	m = newM.(Model)
 	if m.IsPlaying() {
 		t.Errorf("expected playback stopped on PositionMsg.Err, no advance")
+	}
+
+	// Restart and verify mpv's brief EOF-window "property unavailable" does not kill repeat playback.
+	newM, _ = m.startPlaybackAt(0)
+	m = newM.(Model)
+	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: errors.New("get time-pos: mpv error: property unavailable")}
+	newM, _ = m.Update(posMsg)
+	m = newM.(Model)
+	if !m.IsPlaying() || m.currentIndex != 0 {
+		t.Errorf("expected transient mpv property error to keep playback alive, playing=%v idx=%d", m.IsPlaying(), m.currentIndex)
 	}
 
 	// Restart at track 0 for PlayerEndMsg tests.
@@ -401,4 +410,3 @@ func TestAppModel_LibraryNavigationAndHints(t *testing.T) {
 		t.Errorf("expected libraryScreen level to pop back to LevelAlbums on Esc, got %v", m.libraryScreen.CurrentLevel())
 	}
 }
-
