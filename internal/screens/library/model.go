@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
@@ -13,7 +12,11 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/text/collate"
+	"golang.org/x/text/language"
 )
+
+var libraryCollator = collate.New(language.Polish, collate.IgnoreCase)
 
 type Level int
 
@@ -235,7 +238,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.albums = append([]jellyfin.Album(nil), msg.Albums...)
 			slices.SortFunc(m.albums, func(a, b jellyfin.Album) int {
-				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+				return libraryCollator.CompareString(a.Name, b.Name)
 			})
 			items := make([]list.Item, len(m.albums))
 			for i, a := range m.albums {
@@ -254,7 +257,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.tracks = append([]jellyfin.Track(nil), msg.Tracks...)
 			slices.SortFunc(m.tracks, func(a, b jellyfin.Track) int {
-				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+				return libraryCollator.CompareString(a.Name, b.Name)
 			})
 			items := make([]list.Item, len(m.tracks))
 			for i, t := range m.tracks {
@@ -271,7 +274,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.allTracks = append([]jellyfin.Track(nil), msg.Tracks...)
 			slices.SortFunc(m.allTracks, func(a, b jellyfin.Track) int {
-				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+				return libraryCollator.CompareString(a.Name, b.Name)
 			})
 			m.allTracksErr = nil
 		} else {

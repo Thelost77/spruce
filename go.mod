@@ -11,6 +11,7 @@ require (
 	github.com/dexterlb/mpvipc v0.0.0-20241005113212-7cdefca0e933
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/quarckster/go-mpris-server v1.0.3
+	golang.org/x/text v0.3.8
 )
 
 require (
@@ -33,6 +34,5 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.3.8 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )
