@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"path/filepath"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Thelost77/spruce/internal/config"
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/logger"
 	"github.com/Thelost77/spruce/internal/mpris"
@@ -18,8 +18,10 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/login"
 	"github.com/Thelost77/spruce/internal/screens/metadataedit"
 	"github.com/Thelost77/spruce/internal/screens/queue"
+	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui"
 	"github.com/Thelost77/spruce/internal/ui/components"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -188,17 +190,43 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.cfg != nil && m.cfg.Server.Address != "" && m.cfg.Server.Token != "" && m.cfg.Server.UserID != "" {
-		return func() tea.Msg {
-			return login.LoginSuccessMsg{
-				Token:     m.cfg.Server.Token,
-				ServerURL: m.cfg.Server.Address,
-				Username:  m.cfg.Server.Username,
-				UserID:    m.cfg.Server.UserID,
-			}
-		}
+	if m.cfg != nil && m.cfg.Server.Address != "" && m.cfg.Server.UserID != "" {
+		return m.savedLoginCmd()
 	}
 	return m.loginScreen.Init()
+}
+
+func (m Model) savedLoginCmd() tea.Cmd {
+	cfg := m.cfg
+	return func() tea.Msg {
+		token := ""
+		if cfg.Server.Token != "" {
+			token = cfg.Server.Token
+			if err := secrets.SetToken(cfg.Server.Address, cfg.Server.Username, token); err != nil {
+				logger.Warn("failed to migrate token to keychain", "err", err)
+			} else {
+				cfg.Server.Token = ""
+				if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *cfg); err != nil {
+					logger.Warn("failed to clear migrated token from config", "err", err)
+				}
+			}
+		} else {
+			var err error
+			token, err = secrets.GetToken(cfg.Server.Address, cfg.Server.Username)
+			if err != nil {
+				if !errors.Is(err, secrets.ErrNotFound) {
+					logger.Warn("failed to load token from keychain", "err", err)
+				}
+				return nil
+			}
+		}
+		return login.LoginSuccessMsg{
+			Token:     token,
+			ServerURL: cfg.Server.Address,
+			Username:  cfg.Server.Username,
+			UserID:    cfg.Server.UserID,
+		}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -375,9 +403,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cfg != nil {
 			m.cfg.Server.Address = msg.ServerURL
 			m.cfg.Server.Username = msg.Username
-			m.cfg.Server.Token = msg.Token
 			m.cfg.Server.UserID = msg.UserID
-			_ = config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg)
+			m.cfg.Server.Token = ""
+			if err := secrets.SetToken(msg.ServerURL, msg.Username, msg.Token); err != nil {
+				logger.Warn("failed to save token to keychain", "err", err)
+			}
+			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg); err != nil {
+				logger.Warn("failed to save config", "err", err)
+			}
 		}
 		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID)
 		client := m.client
@@ -938,5 +971,3 @@ func formatSleepRemaining(d time.Duration) string {
 	secs := int(d.Seconds()) % 60
 	return fmt.Sprintf("%d:%02d", mins, secs)
 }
-
-

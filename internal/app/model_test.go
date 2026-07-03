@@ -9,14 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Thelost77/spruce/internal/config"
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/mpris"
 	"github.com/Thelost77/spruce/internal/player"
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/screens/login"
 	"github.com/Thelost77/spruce/internal/screens/queue"
+	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/zalando/go-keyring"
 )
 
 func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
@@ -152,6 +155,66 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	v := m.View()
 	if v == "" {
 		t.Error("expected non-empty view")
+	}
+}
+
+func TestAppModel_LoginSuccessStoresTokenInKeychain(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg := config.Default()
+	m := New(&cfg, nil)
+
+	newM, _ := m.Update(login.LoginSuccessMsg{
+		Token:     "tok-1",
+		ServerURL: "https://jellyfin.example.com",
+		Username:  "alice",
+		UserID:    "usr-1",
+	})
+	m = newM.(Model)
+
+	token, err := secrets.GetToken("https://jellyfin.example.com", "alice")
+	if err != nil {
+		t.Fatalf("expected token in keychain: %v", err)
+	}
+	if token != "tok-1" {
+		t.Fatalf("expected token %q, got %q", "tok-1", token)
+	}
+	if m.cfg.Server.Token != "" {
+		t.Fatalf("expected config token cleared, got %q", m.cfg.Server.Token)
+	}
+}
+
+func TestAppModel_InitMigratesPlaintextTokenToKeychain(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg := config.Default()
+	cfg.Server.Address = "https://jellyfin.example.com"
+	cfg.Server.Username = "alice"
+	cfg.Server.Token = "old-token"
+	cfg.Server.UserID = "usr-1"
+	m := New(&cfg, nil)
+
+	cmd := m.Init()
+	msg := cmd()
+	success, ok := msg.(login.LoginSuccessMsg)
+	if !ok {
+		t.Fatalf("expected LoginSuccessMsg, got %T", msg)
+	}
+	if success.Token != "old-token" {
+		t.Fatalf("expected migrated token, got %q", success.Token)
+	}
+
+	token, err := secrets.GetToken("https://jellyfin.example.com", "alice")
+	if err != nil {
+		t.Fatalf("expected token in keychain: %v", err)
+	}
+	if token != "old-token" {
+		t.Fatalf("expected token %q, got %q", "old-token", token)
+	}
+	if cfg.Server.Token != "" {
+		t.Fatalf("expected plaintext token cleared, got %q", cfg.Server.Token)
 	}
 }
 
