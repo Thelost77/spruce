@@ -37,4 +37,3 @@ type EditMetadataMsg struct {
 type SleepTimerExpiredMsg struct {
 	Generation uint64
 }
-

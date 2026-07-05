@@ -40,10 +40,10 @@ type Model struct {
 	queueScreen        queue.Model
 	metadataEditScreen metadataedit.Model
 	palette            components.Palette
-	help          components.HelpOverlay
-	err           components.ErrorBanner
-	repeatTrackID string
-	repeatQueue   bool
+	help               components.HelpOverlay
+	err                components.ErrorBanner
+	repeatTrackID      string
+	repeatQueue        bool
 
 	client *jellyfin.Client
 	cfg    *config.Config
@@ -101,19 +101,45 @@ func New(cfg *config.Config, mpv *player.Mpv) Model {
 		if cfg.Theme.Background != "" {
 			actualCfg.Theme = cfg.Theme
 		}
-		if cfg.Keybinds.Quit != "" { actualCfg.Keybinds.Quit = cfg.Keybinds.Quit }
-		if cfg.Keybinds.PlayPause != "" { actualCfg.Keybinds.PlayPause = cfg.Keybinds.PlayPause }
-		if cfg.Keybinds.SeekForward != "" { actualCfg.Keybinds.SeekForward = cfg.Keybinds.SeekForward }
-		if cfg.Keybinds.SeekBackward != "" { actualCfg.Keybinds.SeekBackward = cfg.Keybinds.SeekBackward }
-		if cfg.Keybinds.NextInQueue != "" { actualCfg.Keybinds.NextInQueue = cfg.Keybinds.NextInQueue }
-		if cfg.Keybinds.SpeedUp != "" { actualCfg.Keybinds.SpeedUp = cfg.Keybinds.SpeedUp }
-		if cfg.Keybinds.SpeedDown != "" { actualCfg.Keybinds.SpeedDown = cfg.Keybinds.SpeedDown }
-		if cfg.Keybinds.VolumeUp != "" { actualCfg.Keybinds.VolumeUp = cfg.Keybinds.VolumeUp }
-		if cfg.Keybinds.VolumeDown != "" { actualCfg.Keybinds.VolumeDown = cfg.Keybinds.VolumeDown }
-		if cfg.Keybinds.NextChapter != "" { actualCfg.Keybinds.NextChapter = cfg.Keybinds.NextChapter }
-		if cfg.Keybinds.PrevChapter != "" { actualCfg.Keybinds.PrevChapter = cfg.Keybinds.PrevChapter }
-		if cfg.Keybinds.SleepTimer != "" { actualCfg.Keybinds.SleepTimer = cfg.Keybinds.SleepTimer }
-		if cfg.Keybinds.Back != "" { actualCfg.Keybinds.Back = cfg.Keybinds.Back }
+		if cfg.Keybinds.Quit != "" {
+			actualCfg.Keybinds.Quit = cfg.Keybinds.Quit
+		}
+		if cfg.Keybinds.PlayPause != "" {
+			actualCfg.Keybinds.PlayPause = cfg.Keybinds.PlayPause
+		}
+		if cfg.Keybinds.SeekForward != "" {
+			actualCfg.Keybinds.SeekForward = cfg.Keybinds.SeekForward
+		}
+		if cfg.Keybinds.SeekBackward != "" {
+			actualCfg.Keybinds.SeekBackward = cfg.Keybinds.SeekBackward
+		}
+		if cfg.Keybinds.NextInQueue != "" {
+			actualCfg.Keybinds.NextInQueue = cfg.Keybinds.NextInQueue
+		}
+		if cfg.Keybinds.SpeedUp != "" {
+			actualCfg.Keybinds.SpeedUp = cfg.Keybinds.SpeedUp
+		}
+		if cfg.Keybinds.SpeedDown != "" {
+			actualCfg.Keybinds.SpeedDown = cfg.Keybinds.SpeedDown
+		}
+		if cfg.Keybinds.VolumeUp != "" {
+			actualCfg.Keybinds.VolumeUp = cfg.Keybinds.VolumeUp
+		}
+		if cfg.Keybinds.VolumeDown != "" {
+			actualCfg.Keybinds.VolumeDown = cfg.Keybinds.VolumeDown
+		}
+		if cfg.Keybinds.NextChapter != "" {
+			actualCfg.Keybinds.NextChapter = cfg.Keybinds.NextChapter
+		}
+		if cfg.Keybinds.PrevChapter != "" {
+			actualCfg.Keybinds.PrevChapter = cfg.Keybinds.PrevChapter
+		}
+		if cfg.Keybinds.SleepTimer != "" {
+			actualCfg.Keybinds.SleepTimer = cfg.Keybinds.SleepTimer
+		}
+		if cfg.Keybinds.Back != "" {
+			actualCfg.Keybinds.Back = cfg.Keybinds.Back
+		}
 	}
 	var p player.Player
 	if mpv != nil {
@@ -322,6 +348,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m.startPlaybackAt(m.currentIndex - 1)
 						}
 						return m, nil
+					}
+					if key.Matches(msg, m.keys.RepeatTrack) {
+						return m.Update(queue.QueueActionMsg{
+							Action:  "repeat_track",
+							Index:   m.currentIndex,
+							TrackID: m.tracks[m.currentIndex].ID,
+						})
+					}
+					if key.Matches(msg, m.keys.RepeatQueue) {
+						return m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
 					}
 					oldSpeed := m.playerState.Speed
 					oldVol := m.playerState.Volume
@@ -776,17 +812,57 @@ func (m Model) QueueLength() int {
 
 type mprisStateAccessor struct{ s *MprisState }
 
-func (a mprisStateAccessor) IsPlaying() bool          { return a.s != nil && a.s.IsPlaying }
-func (a mprisStateAccessor) IsPaused() bool           { return a.s != nil && a.s.IsPaused }
-func (a mprisStateAccessor) HasActiveItem() bool      { return a.s != nil && a.s.IsPlaying }
-func (a mprisStateAccessor) CurrentTitle() string     { if a.s != nil { return a.s.Title }; return "" }
-func (a mprisStateAccessor) CurrentAuthors() []string { if a.s != nil { return a.s.Authors }; return nil }
-func (a mprisStateAccessor) CurrentItemID() string    { if a.s != nil { return a.s.ItemID }; return "" }
-func (a mprisStateAccessor) PlayerPosition() float64  { if a.s != nil { return a.s.Position }; return 0 }
-func (a mprisStateAccessor) PlayerDuration() float64  { if a.s != nil { return a.s.Duration }; return 0 }
-func (a mprisStateAccessor) PlayerSpeed() float64     { if a.s != nil { return a.s.Speed }; return 1.0 }
-func (a mprisStateAccessor) PlayerVolume() int        { if a.s != nil { return a.s.Volume }; return 100 }
-func (a mprisStateAccessor) QueueLength() int         { if a.s != nil { return a.s.QueueLen }; return 0 }
+func (a mprisStateAccessor) IsPlaying() bool     { return a.s != nil && a.s.IsPlaying }
+func (a mprisStateAccessor) IsPaused() bool      { return a.s != nil && a.s.IsPaused }
+func (a mprisStateAccessor) HasActiveItem() bool { return a.s != nil && a.s.IsPlaying }
+func (a mprisStateAccessor) CurrentTitle() string {
+	if a.s != nil {
+		return a.s.Title
+	}
+	return ""
+}
+func (a mprisStateAccessor) CurrentAuthors() []string {
+	if a.s != nil {
+		return a.s.Authors
+	}
+	return nil
+}
+func (a mprisStateAccessor) CurrentItemID() string {
+	if a.s != nil {
+		return a.s.ItemID
+	}
+	return ""
+}
+func (a mprisStateAccessor) PlayerPosition() float64 {
+	if a.s != nil {
+		return a.s.Position
+	}
+	return 0
+}
+func (a mprisStateAccessor) PlayerDuration() float64 {
+	if a.s != nil {
+		return a.s.Duration
+	}
+	return 0
+}
+func (a mprisStateAccessor) PlayerSpeed() float64 {
+	if a.s != nil {
+		return a.s.Speed
+	}
+	return 1.0
+}
+func (a mprisStateAccessor) PlayerVolume() int {
+	if a.s != nil {
+		return a.s.Volume
+	}
+	return 100
+}
+func (a mprisStateAccessor) QueueLength() int {
+	if a.s != nil {
+		return a.s.QueueLen
+	}
+	return 0
+}
 
 func (m Model) nextIndex(defaultNext int) int {
 	if m.repeatTrackID != "" {

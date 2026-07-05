@@ -277,6 +277,38 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 	}
 }
 
+func TestAppModel_GlobalRepeatKeysWhenPlayerActive(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+	m.tracks = []jellyfin.Track{
+		{ID: "t-1", Name: "Track 1", RunTimeTicks: 1800000000},
+		{ID: "t-2", Name: "Track 2", RunTimeTicks: 1800000000},
+	}
+	m.currentIndex = 1
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = newM.(Model)
+	if m.repeatTrackID != "t-2" || m.repeatQueue {
+		t.Fatalf("expected current track repeat, got track=%q queue=%v", m.repeatTrackID, m.repeatQueue)
+	}
+	if m.playerState.RepeatStatus == "" {
+		t.Fatal("expected repeat status after r")
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = newM.(Model)
+	if m.repeatTrackID != "" || m.playerState.RepeatStatus != "" {
+		t.Fatalf("expected repeat track cleared, got track=%q status=%q", m.repeatTrackID, m.playerState.RepeatStatus)
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = newM.(Model)
+	if !m.repeatQueue || m.repeatTrackID != "" {
+		t.Fatalf("expected repeat queue enabled, got track=%q queue=%v", m.repeatTrackID, m.repeatQueue)
+	}
+}
+
 func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
 	m := New(nil, nil)
 	m.SetSize(80, 24)

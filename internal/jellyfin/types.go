@@ -76,13 +76,13 @@ type itemsResponse[T any] struct {
 // PlaybackProgressRequest is sent to POST /Sessions/Playing, /Sessions/Playing/Progress,
 // and /Sessions/Playing/Stopped. Jellyfin correlates the play session via PlaySessionId.
 type PlaybackProgressRequest struct {
-	ItemID         string `json:"ItemId"`
-	PositionTicks  int64  `json:"PositionTicks"`
-	IsPaused       bool   `json:"IsPaused"`
-	PlayMethod     string `json:"PlayMethod"`
-	CanSeek        bool   `json:"CanSeek"`
-	PlaySessionId  string `json:"PlaySessionId"`
-	MediaSourceId  string `json:"MediaSourceId"`
+	ItemID        string `json:"ItemId"`
+	PositionTicks int64  `json:"PositionTicks"`
+	IsPaused      bool   `json:"IsPaused"`
+	PlayMethod    string `json:"PlayMethod"`
+	CanSeek       bool   `json:"CanSeek"`
+	PlaySessionId string `json:"PlaySessionId"`
+	MediaSourceId string `json:"MediaSourceId"`
 }
 
 // SecondsToTicks converts seconds to Jellyfin 100ns ticks.

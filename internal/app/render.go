@@ -12,10 +12,10 @@ import (
 // line so the available screen height is the terminal height minus whichever
 // layers are currently visible.
 const (
-	headerHeight        = 1
-	errorBannerHeight   = 1
-	hintsHeight         = 1
-	playerFooterHeight  = 1
+	headerHeight       = 1
+	errorBannerHeight  = 1
+	hintsHeight        = 1
+	playerFooterHeight = 1
 )
 
 // View composes the header, error banner, active screen, hints, and player

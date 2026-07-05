@@ -370,13 +370,13 @@ func (c *Client) ReportPlaybackStart(ctx context.Context, itemID, playSessionID 
 // ReportPlaybackProgress reports active playback position heartbeats.
 func (c *Client) ReportPlaybackProgress(ctx context.Context, itemID string, positionSeconds float64, paused bool, playSessionID string) error {
 	body := PlaybackProgressRequest{
-		ItemID:         itemID,
-		PositionTicks:  SecondsToTicks(positionSeconds),
-		IsPaused:       paused,
-		PlayMethod:     "DirectPlay",
-		CanSeek:        true,
-		PlaySessionId:  playSessionID,
-		MediaSourceId:  itemID,
+		ItemID:        itemID,
+		PositionTicks: SecondsToTicks(positionSeconds),
+		IsPaused:      paused,
+		PlayMethod:    "DirectPlay",
+		CanSeek:       true,
+		PlaySessionId: playSessionID,
+		MediaSourceId: itemID,
 	}
 	_, err := c.do(ctx, http.MethodPost, "/Sessions/Playing/Progress", body)
 	return err
@@ -385,12 +385,12 @@ func (c *Client) ReportPlaybackProgress(ctx context.Context, itemID string, posi
 // ReportPlaybackStopped reports that playback has stopped.
 func (c *Client) ReportPlaybackStopped(ctx context.Context, itemID string, positionSeconds float64, playSessionID string) error {
 	body := PlaybackProgressRequest{
-		ItemID:         itemID,
-		PositionTicks:  SecondsToTicks(positionSeconds),
-		PlayMethod:     "DirectPlay",
-		CanSeek:        true,
-		PlaySessionId:  playSessionID,
-		MediaSourceId:  itemID,
+		ItemID:        itemID,
+		PositionTicks: SecondsToTicks(positionSeconds),
+		PlayMethod:    "DirectPlay",
+		CanSeek:       true,
+		PlaySessionId: playSessionID,
+		MediaSourceId: itemID,
 	}
 	_, err := c.do(ctx, http.MethodPost, "/Sessions/Playing/Stopped", body)
 	return err

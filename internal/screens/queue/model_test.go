@@ -117,4 +117,3 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 		t.Errorf("unexpected msg: %+v", msg)
 	}
 }
-
