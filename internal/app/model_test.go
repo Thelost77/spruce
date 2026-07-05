@@ -505,3 +505,19 @@ func TestAppModel_LibraryNavigationAndHints(t *testing.T) {
 		t.Errorf("expected libraryScreen level to pop back to LevelAlbums on Esc, got %v", m.libraryScreen.CurrentLevel())
 	}
 }
+
+func TestAppModel_QueueHintsDoNotDuplicatePlayerControls(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(220, 24)
+	m.screen = ScreenQueue
+	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}}
+	m.currentIndex = 0
+
+	hints := m.viewHints()
+	if got := strings.Count(hints, "prev/next"); got != 1 {
+		t.Fatalf("expected one prev/next hint, got %d in %q", got, hints)
+	}
+	if !strings.Contains(hints, "speed") || !strings.Contains(hints, "vol") {
+		t.Fatalf("expected global player speed/vol hints, got %q", hints)
+	}
+}

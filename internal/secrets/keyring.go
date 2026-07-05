@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 
 	"github.com/zalando/go-keyring"
@@ -16,11 +17,29 @@ func tokenAccount(serverURL, username string) string {
 }
 
 func GetToken(serverURL, username string) (string, error) {
-	token, err := keyring.Get(Service, tokenAccount(serverURL, username))
+	account := tokenAccount(serverURL, username)
+	token, err := keyring.Get(Service, account)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return "", ErrNotFound
 	}
+	if err != nil {
+		if token, fallbackErr := getTokenWithSecretTool(account); fallbackErr == nil {
+			return token, nil
+		}
+	}
 	return token, err
+}
+
+func getTokenWithSecretTool(account string) (string, error) {
+	out, err := exec.Command("secret-tool", "lookup", "service", Service, "username", account).Output()
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimRight(string(out), "\r\n")
+	if token == "" {
+		return "", ErrNotFound
+	}
+	return token, nil
 }
 
 func SetToken(serverURL, username, token string) error {

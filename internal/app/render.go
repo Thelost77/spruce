@@ -155,7 +155,10 @@ func (m Model) viewHints() string {
 
 	if m.screen != ScreenLogin && m.screen != ScreenMetadataEdit {
 		if m.IsPlaying() {
-			parts = append(parts, key("</>", "prev/next"), key("-/+", "speed"), key("[/]", "vol"))
+			if m.screen != ScreenQueue {
+				parts = append(parts, key("</>", "prev/next"))
+			}
+			parts = append(parts, key("-/+", "speed"), key("[/]", "vol"))
 		}
 		parts = append(parts, key("?", "help"), key("q", "quit"))
 	}
