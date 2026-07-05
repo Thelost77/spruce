@@ -7,6 +7,7 @@ type Screen int
 const (
 	ScreenLogin Screen = iota
 	ScreenLibrary
+	ScreenPlaylists
 	ScreenQueue
 	ScreenMetadataEdit
 )

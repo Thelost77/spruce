@@ -133,6 +133,49 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 	}
 }
 
+func TestClient_GetPlaylists(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/Users/user-123/Items":
+			if r.URL.Query().Get("IncludeItemTypes") != "Playlist" {
+				t.Fatalf("IncludeItemTypes = %q, want Playlist", r.URL.Query().Get("IncludeItemTypes"))
+			}
+			_ = json.NewEncoder(w).Encode(itemsResponse[Playlist]{
+				Items:            []Playlist{{ID: "pl-1", Name: "Favorites", Count: 2}},
+				TotalRecordCount: 1,
+			})
+		case "/Playlists/pl-1/Items":
+			if r.URL.Query().Get("userId") != "user-123" {
+				t.Fatalf("userId = %q, want user-123", r.URL.Query().Get("userId"))
+			}
+			_ = json.NewEncoder(w).Encode(itemsResponse[Track]{
+				Items:            []Track{{ID: "trk-1", Name: "One"}, {ID: "trk-2", Name: "Two"}},
+				TotalRecordCount: 2,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-xyz", "user-123")
+	playlists, err := client.GetPlaylists(context.Background())
+	if err != nil {
+		t.Fatalf("GetPlaylists error: %v", err)
+	}
+	if len(playlists) != 1 || playlists[0].Name != "Favorites" || playlists[0].Count != 2 {
+		t.Fatalf("unexpected playlists: %+v", playlists)
+	}
+
+	tracks, err := client.GetPlaylistTracks(context.Background(), "pl-1")
+	if err != nil {
+		t.Fatalf("GetPlaylistTracks error: %v", err)
+	}
+	if len(tracks) != 2 || tracks[1].Name != "Two" {
+		t.Fatalf("unexpected playlist tracks: %+v", tracks)
+	}
+}
+
 func TestClient_StreamHelpersAndProgress(t *testing.T) {
 	progressCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

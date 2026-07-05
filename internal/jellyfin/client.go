@@ -354,6 +354,66 @@ func (c *Client) GetAllTracks(ctx context.Context, libraryID string) ([]Track, e
 	return items, nil
 }
 
+// GetPlaylists fetches user playlists.
+func (c *Client) GetPlaylists(ctx context.Context) ([]Playlist, error) {
+	if c.userID == "" {
+		return nil, errors.New("user ID not set")
+	}
+	params := url.Values{}
+	params.Set("SortBy", "SortName")
+	params.Set("SortOrder", "Ascending")
+	params.Set("IncludeItemTypes", "Playlist")
+	params.Set("Recursive", "true")
+
+	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
+	items, err := fetchPaged[Playlist](c, ctx, basePath, params)
+	if err != nil {
+		return nil, fmt.Errorf("get playlists: %w", err)
+	}
+	return items, nil
+}
+
+// GetPlaylistTracks fetches audio tracks in a playlist.
+func (c *Client) GetPlaylistTracks(ctx context.Context, playlistID string) ([]Track, error) {
+	if c.userID == "" {
+		return nil, errors.New("user ID not set")
+	}
+	var acc []Track
+	startIndex := 0
+	total := -1
+	for {
+		q := url.Values{}
+		q.Set("userId", c.userID)
+		q.Set("startIndex", strconv.Itoa(startIndex))
+		q.Set("limit", strconv.Itoa(pageLimit))
+		path := fmt.Sprintf("/Playlists/%s/Items?%s", url.PathEscape(playlistID), q.Encode())
+		data, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("get playlist tracks: %w", err)
+		}
+		var page itemsResponse[Track]
+		if err := json.Unmarshal(data, &page); err != nil {
+			return nil, fmt.Errorf("decode playlist tracks: %w", err)
+		}
+		acc = append(acc, page.Items...)
+		if total < 0 {
+			total = page.TotalRecordCount
+		}
+		startIndex += len(page.Items)
+		if len(page.Items) == 0 {
+			break
+		}
+		if total > 0 {
+			if startIndex >= total {
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return acc, nil
+}
+
 // ReportPlaybackStart reports to Jellyfin that playback has begun.
 func (c *Client) ReportPlaybackStart(ctx context.Context, itemID, playSessionID string) error {
 	body := PlaybackProgressRequest{

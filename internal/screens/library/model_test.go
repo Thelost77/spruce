@@ -230,6 +230,72 @@ func TestLibraryModel_SortsLibraryItemsAlphabetically(t *testing.T) {
 	}
 }
 
+func TestLibraryModel_FetchesAcrossMusicLibraries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		itemTypes := r.URL.Query().Get("IncludeItemTypes")
+		parentID := r.URL.Query().Get("ParentId")
+		switch {
+		case itemTypes == "MusicAlbum" && parentID == "lib-1":
+			_ = json.NewEncoder(w).Encode(struct {
+				Items            []jellyfin.Album `json:"Items"`
+				TotalRecordCount int              `json:"TotalRecordCount"`
+			}{
+				Items:            []jellyfin.Album{{ID: "alb-1", Name: "Alpha"}},
+				TotalRecordCount: 1,
+			})
+		case itemTypes == "MusicAlbum" && parentID == "lib-2":
+			_ = json.NewEncoder(w).Encode(struct {
+				Items            []jellyfin.Album `json:"Items"`
+				TotalRecordCount int              `json:"TotalRecordCount"`
+			}{
+				Items:            []jellyfin.Album{{ID: "alb-2", Name: "Beta"}},
+				TotalRecordCount: 1,
+			})
+		case itemTypes == "Audio" && parentID == "lib-1":
+			_ = json.NewEncoder(w).Encode(struct {
+				Items            []jellyfin.Track `json:"Items"`
+				TotalRecordCount int              `json:"TotalRecordCount"`
+			}{
+				Items:            []jellyfin.Track{{ID: "t-1", Name: "One"}},
+				TotalRecordCount: 1,
+			})
+		case itemTypes == "Audio" && parentID == "lib-2":
+			_ = json.NewEncoder(w).Encode(struct {
+				Items            []jellyfin.Track `json:"Items"`
+				TotalRecordCount int              `json:"TotalRecordCount"`
+			}{
+				Items:            []jellyfin.Track{{ID: "t-2", Name: "Two"}},
+				TotalRecordCount: 1,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := jellyfin.NewClient(server.URL, "tok", "usr")
+	m := New(ui.DefaultStyles())
+	m.SetLibraries(client, []jellyfin.Library{
+		{ID: "lib-1", Name: "Main", CollectionType: "music"},
+		{ID: "lib-2", Name: "Imported", CollectionType: "music"},
+	})
+
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("expected init cmd")
+	}
+	m, _ = m.Update(cmd())
+	if got := names(m.Albums()); len(got) != 2 || got[0] != "Alpha" || got[1] != "Beta" {
+		t.Fatalf("albums = %v, want [Alpha Beta]", got)
+	}
+
+	cmd = m.FetchAllTracksCmd()
+	m, _ = m.Update(cmd())
+	if got := trackNames(m.AllTracks()); len(got) != 2 || got[0] != "One" || got[1] != "Two" {
+		t.Fatalf("tracks = %v, want [One Two]", got)
+	}
+}
+
 func names(albums []jellyfin.Album) []string {
 	out := make([]string, len(albums))
 	for i, album := range albums {

@@ -26,8 +26,9 @@ const (
 )
 
 type Model struct {
-	client    *jellyfin.Client
-	libraryID string
+	client     *jellyfin.Client
+	libraryID  string
+	libraryIDs []string
 
 	level Level
 
@@ -88,6 +89,26 @@ func New(styles ui.Styles) Model {
 func (m *Model) SetClient(client *jellyfin.Client, libraryID string) {
 	m.client = client
 	m.libraryID = libraryID
+	if libraryID != "" {
+		m.libraryIDs = []string{libraryID}
+	} else {
+		m.libraryIDs = nil
+	}
+}
+
+func (m *Model) SetLibraries(client *jellyfin.Client, libraries []jellyfin.Library) {
+	m.client = client
+	m.libraryIDs = m.libraryIDs[:0]
+	for _, lib := range libraries {
+		if lib.ID != "" {
+			m.libraryIDs = append(m.libraryIDs, lib.ID)
+		}
+	}
+	if len(m.libraryIDs) > 0 {
+		m.libraryID = m.libraryIDs[0]
+	} else {
+		m.libraryID = ""
+	}
 }
 
 func (m *Model) SetSize(width, height int) {
@@ -99,19 +120,36 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.client != nil && m.libraryID != "" && len(m.albumList.Items()) == 0 {
+	if m.client != nil && len(m.musicLibraryIDs()) > 0 && len(m.albumList.Items()) == 0 {
 		return m.fetchAllAlbumsCmd()
+	}
+	return nil
+}
+
+func (m Model) musicLibraryIDs() []string {
+	if len(m.libraryIDs) > 0 {
+		return m.libraryIDs
+	}
+	if m.libraryID != "" {
+		return []string{m.libraryID}
 	}
 	return nil
 }
 
 func (m Model) fetchAllAlbumsCmd() tea.Cmd {
 	client := m.client
-	libID := m.libraryID
+	libIDs := append([]string(nil), m.musicLibraryIDs()...)
 	return func() tea.Msg {
-		logger.Info("fetching all albums", "libraryID", libID)
-		albums, err := client.GetAllAlbums(context.Background(), libID)
-		return AlbumsLoadedMsg{Albums: albums, Err: err}
+		var all []jellyfin.Album
+		for _, libID := range libIDs {
+			logger.Info("fetching all albums", "libraryID", libID)
+			albums, err := client.GetAllAlbums(context.Background(), libID)
+			if err != nil {
+				return AlbumsLoadedMsg{Err: err}
+			}
+			all = append(all, albums...)
+		}
+		return AlbumsLoadedMsg{Albums: all}
 	}
 }
 
@@ -169,13 +207,20 @@ func (m Model) fetchAlbumTracksForShuffledQueueCmd(albumID string) tea.Cmd {
 
 func (m Model) FetchAllTracksCmd() tea.Cmd {
 	client := m.client
-	libID := m.libraryID
+	libIDs := append([]string(nil), m.musicLibraryIDs()...)
 	return func() tea.Msg {
-		logger.Info("fetching all library tracks", "libraryID", libID)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		tracks, err := client.GetAllTracks(ctx, libID)
-		return AllTracksLoadedMsg{Tracks: tracks, Err: err}
+		var all []jellyfin.Track
+		for _, libID := range libIDs {
+			logger.Info("fetching all library tracks", "libraryID", libID)
+			tracks, err := client.GetAllTracks(ctx, libID)
+			if err != nil {
+				return AllTracksLoadedMsg{Err: err}
+			}
+			all = append(all, tracks...)
+		}
+		return AllTracksLoadedMsg{Tracks: all}
 	}
 }
 
@@ -427,6 +472,20 @@ func (m Model) Albums() []jellyfin.Album {
 
 func (m Model) Tracks() []jellyfin.Track {
 	return m.tracks
+}
+
+func (m Model) SelectedAlbum() (jellyfin.Album, bool) {
+	if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
+		return sel.Album, true
+	}
+	return jellyfin.Album{}, false
+}
+
+func (m Model) SelectedTrack() (jellyfin.Track, bool) {
+	if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
+		return sel.Track, true
+	}
+	return jellyfin.Track{}, false
 }
 
 func (m Model) AllTracks() []jellyfin.Track {

@@ -14,6 +14,7 @@ type KeyMap struct {
 	Shuffle       key.Binding
 	RepeatTrack   key.Binding
 	RepeatQueue   key.Binding
+	OpenPlaylists key.Binding
 	GlobalPalette key.Binding
 	SleepTimer    key.Binding
 }
@@ -72,6 +73,10 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 		RepeatQueue: key.NewBinding(
 			key.WithKeys("R"),
 			key.WithHelp("R", "repeat queue"),
+		),
+		OpenPlaylists: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("o", "open playlists"),
 		),
 		GlobalPalette: key.NewBinding(
 			key.WithKeys("ctrl+p"),

@@ -39,6 +39,13 @@ type Album struct {
 	Artists        []string `json:"Artists,omitempty"`
 }
 
+// Playlist represents a Jellyfin playlist item.
+type Playlist struct {
+	ID    string `json:"Id"`
+	Name  string `json:"Name"`
+	Count int    `json:"ChildCount,omitempty"`
+}
+
 // Track represents a single audio track item.
 type Track struct {
 	ID                string   `json:"Id"`

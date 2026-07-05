@@ -15,6 +15,7 @@ import (
 	"github.com/Thelost77/spruce/internal/player"
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/screens/login"
+	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/Thelost77/spruce/internal/screens/queue"
 	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui/components"
@@ -274,6 +275,86 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 	m = newM.(Model)
 	if m.currentIndex != 0 {
 		t.Errorf("expected currentIndex 0 after p, got %d", m.currentIndex)
+	}
+
+	vol := m.playerState.Volume
+	newM, _ = m.handlePaletteAction(components.ActionVolumeUp, "", nil)
+	m = newM.(Model)
+	if m.playerState.Volume <= vol {
+		t.Fatalf("expected palette volume up to increase volume")
+	}
+
+	m.repeatQueue = false
+	newM, _ = m.handlePaletteAction(components.ActionRepeatQueue, "", nil)
+	m = newM.(Model)
+	if !m.repeatQueue {
+		t.Fatalf("expected palette repeat queue to enable repeatQueue")
+	}
+}
+
+func TestAppModel_PlaylistsNavigationAndPalette(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = newM.(Model)
+	if m.screen != ScreenPlaylists {
+		t.Fatalf("expected o to open playlists, got %v", m.screen)
+	}
+
+	m.playlistsScreen, _ = m.playlistsScreen.Update(playlists.PlaylistsLoadedMsg{
+		Playlists: []jellyfin.Playlist{{ID: "pl-1", Name: "Road Trip"}},
+	})
+	m.openCommandPalette()
+	found := false
+	for _, item := range m.contentSearchFunc()("road") {
+		if item.Label == "Playlist: Road Trip" && item.Action == components.ActionOpenSelected {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected playlist search result in command palette")
+	}
+
+	newM, _ = m.handlePaletteAction(components.ActionGoPlaylists, "", nil)
+	m = newM.(Model)
+	if m.screen != ScreenPlaylists {
+		t.Fatalf("expected palette Go Playlists to open playlists, got %v", m.screen)
+	}
+}
+
+func TestAppModel_ContextPaletteActions(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+	m.libraryScreen, _ = m.libraryScreen.Update(library.AlbumsLoadedMsg{
+		Albums: []jellyfin.Album{{ID: "alb-1", Name: "Album One"}},
+	})
+
+	items := m.contextPaletteItems()
+	hasQueueAlbum := false
+	hasEdit := false
+	for _, item := range items {
+		hasQueueAlbum = hasQueueAlbum || item.Action == components.ActionQueueItem
+		hasEdit = hasEdit || item.Action == components.ActionEditMetadata
+	}
+	if !hasQueueAlbum || !hasEdit {
+		t.Fatalf("expected album context queue/edit actions, got %+v", items)
+	}
+
+	m.screen = ScreenPlaylists
+	m.playlistsScreen, _ = m.playlistsScreen.Update(playlists.PlaylistsLoadedMsg{
+		Playlists: []jellyfin.Playlist{{ID: "pl-1", Name: "Road Trip"}},
+	})
+	items = m.contextPaletteItems()
+	hasShuffle := false
+	for _, item := range items {
+		hasShuffle = hasShuffle || item.Action == components.ActionShuffleItem
+	}
+	if !hasShuffle {
+		t.Fatalf("expected playlist context shuffle action, got %+v", items)
 	}
 }
 

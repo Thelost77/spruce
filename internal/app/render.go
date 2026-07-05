@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Thelost77/spruce/internal/screens/library"
+	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -63,6 +64,8 @@ func (s Screen) String() string {
 		return "login"
 	case ScreenLibrary:
 		return "library"
+	case ScreenPlaylists:
+		return "playlists"
 	case ScreenQueue:
 		return "queue"
 	default:
@@ -84,6 +87,8 @@ func (m Model) viewScreen() string {
 		return m.loginScreen.View()
 	case ScreenLibrary:
 		return m.libraryScreen.View()
+	case ScreenPlaylists:
+		return m.playlistsScreen.View()
 	case ScreenQueue:
 		return m.queueScreen.View()
 	case ScreenMetadataEdit:
@@ -120,6 +125,27 @@ func (m Model) viewHints() string {
 				key("A", "add album"),
 				key("S", "shuffle album"),
 				key("m", "edit meta"),
+				key("/", "search"),
+				key("esc", "back"),
+				key("tab", "queue"),
+			)
+		}
+	case ScreenPlaylists:
+		if m.playlistsScreen.CurrentLevel() == playlists.LevelPlaylists {
+			parts = append(parts,
+				key("enter", "open"),
+				key("a/A", "queue playlist"),
+				key("S", "shuffle playlist"),
+				key("/", "search"),
+				key("esc", "back"),
+				key("tab", "queue"),
+			)
+		} else {
+			parts = append(parts,
+				key("enter", "play"),
+				key("a", "add track"),
+				key("A", "add playlist"),
+				key("S", "shuffle playlist"),
 				key("/", "search"),
 				key("esc", "back"),
 				key("tab", "queue"),

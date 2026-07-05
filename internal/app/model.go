@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/screens/login"
 	"github.com/Thelost77/spruce/internal/screens/metadataedit"
+	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/Thelost77/spruce/internal/screens/queue"
 	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui"
@@ -37,6 +39,7 @@ type Model struct {
 
 	loginScreen        login.Model
 	libraryScreen      library.Model
+	playlistsScreen    playlists.Model
 	queueScreen        queue.Model
 	metadataEditScreen metadataedit.Model
 	palette            components.Palette
@@ -148,20 +151,21 @@ func New(cfg *config.Config, mpv *player.Mpv) Model {
 	pal := components.NewPalette()
 	pal.SetStyles(styles)
 	return Model{
-		screen:        ScreenLogin,
-		keys:          DefaultKeyMap(actualCfg.Keybinds),
-		loginScreen:   login.New(styles),
-		libraryScreen: library.New(styles),
-		queueScreen:   queue.New(styles),
-		palette:       pal,
-		help:          components.NewHelpOverlay(styles),
-		cfg:           cfg,
-		mpv:           mpv,
-		mprisState:    &MprisState{},
-		playerState:   player.NewModel(p, actualCfg, styles),
-		err:           components.NewErrorBanner(styles.Error),
-		currentIndex:  -1,
-		styles:        styles,
+		screen:          ScreenLogin,
+		keys:            DefaultKeyMap(actualCfg.Keybinds),
+		loginScreen:     login.New(styles),
+		libraryScreen:   library.New(styles),
+		playlistsScreen: playlists.New(styles),
+		queueScreen:     queue.New(styles),
+		palette:         pal,
+		help:            components.NewHelpOverlay(styles),
+		cfg:             cfg,
+		mpv:             mpv,
+		mprisState:      &MprisState{},
+		playerState:     player.NewModel(p, actualCfg, styles),
+		err:             components.NewErrorBanner(styles.Error),
+		currentIndex:    -1,
+		styles:          styles,
 	}
 }
 
@@ -208,6 +212,7 @@ func (m *Model) SetSize(width, height int) {
 	sh := m.screenHeight()
 	m.loginScreen.SetSize(w, sh)
 	m.libraryScreen.SetSize(w, sh)
+	m.playlistsScreen.SetSize(w, sh)
 	m.queueScreen.SetSize(w, sh)
 	m.playerState.SetWidth(w)
 	m.err.SetWidth(w)
@@ -291,6 +296,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			isFiltering := false
 			if m.screen == ScreenLibrary && m.libraryScreen.IsFiltering() {
 				isFiltering = true
+			} else if m.screen == ScreenPlaylists && m.playlistsScreen.IsFiltering() {
+				isFiltering = true
 			} else if m.screen == ScreenQueue && m.queueScreen.IsFiltering() {
 				isFiltering = true
 			}
@@ -309,6 +316,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if !isFiltering {
+				if key.Matches(msg, m.keys.OpenPlaylists) {
+					return m.navigate(ScreenPlaylists)
+				}
 				if key.Matches(msg, m.keys.Quit) {
 					if m.currentIndex >= 0 && m.client != nil {
 						newM, stopCmd := m.stopPlayback()
@@ -375,7 +385,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.String() == "tab" && m.screen != ScreenLogin {
-			if m.screen == ScreenLibrary {
+			if m.screen == ScreenLibrary || m.screen == ScreenPlaylists {
 				m.screen = ScreenQueue
 				m.propagateSize()
 				return m, m.initScreen(ScreenQueue)
@@ -387,6 +397,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if key.Matches(msg, m.keys.Back) && m.screen != ScreenLogin {
+			if m.screen == ScreenPlaylists {
+				if m.playlistsScreen.IsFiltering() || m.playlistsScreen.HasActiveFilter() || m.playlistsScreen.CurrentLevel() == playlists.LevelTracks {
+					var cmd tea.Cmd
+					m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
+					return m, cmd
+				}
+				return m.back()
+			}
 			if m.screen == ScreenQueue {
 				if m.queueScreen.IsFiltering() || m.queueScreen.HasActiveFilter() {
 					var cmd tea.Cmd
@@ -449,6 +467,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID)
+		m.playlistsScreen.SetClient(m.client)
 		client := m.client
 		fetchLibsCmd := func() tea.Msg {
 			libs, err := client.GetMusicLibraries(context.Background())
@@ -460,11 +479,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case musicLibrariesLoadedMsg:
 		if msg.err == nil && len(msg.libraries) > 0 {
-			libID := msg.libraries[0].ID
-			m.libraryScreen.SetClient(m.client, libID)
+			m.libraryScreen.SetLibraries(m.client, msg.libraries)
 			m.screen = ScreenLibrary
-			return m, tea.Batch(m.libraryScreen.Init(), m.libraryScreen.FetchAllTracksCmd())
+			return m, tea.Batch(m.libraryScreen.Init(), m.libraryScreen.FetchAllTracksCmd(), m.playlistsScreen.Init())
 		}
+
+	case playlists.PlaylistsLoadedMsg, playlists.PlaylistTracksLoadedMsg:
+		var cmd tea.Cmd
+		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
+		return m, cmd
 
 	case library.AllTracksLoadedMsg:
 		m.libraryScreen, _ = m.libraryScreen.Update(msg)
@@ -741,6 +764,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loginScreen, cmd = m.loginScreen.Update(msg)
 	case ScreenLibrary:
 		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
+	case ScreenPlaylists:
+		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
 	case ScreenQueue:
 		m.queueScreen, cmd = m.queueScreen.Update(msg)
 	case ScreenMetadataEdit:
@@ -880,14 +905,86 @@ func (m Model) nextIndex(defaultNext int) int {
 
 func (m *Model) openCommandPalette() {
 	staticItems := []components.PaletteItem{
+		{Label: "Navigation", IsHeader: true},
 		{Label: "Go to Library", Action: components.ActionGoLibrary},
+		{Label: "Go to Playlists", Action: components.ActionGoPlaylists},
 		{Label: "Go to Queue", Action: components.ActionShowQueue},
-		{Label: "Toggle Play / Pause", Action: components.ActionTogglePlay},
-		{Label: "Next Track", Action: components.ActionNextChapter},
-		{Label: "Previous Track", Action: components.ActionPrevChapter},
-		{Label: "Clear Queue", Action: components.ActionClearQueue},
+	}
+	staticItems = append(staticItems, m.contextPaletteItems()...)
+	if m.IsPlaying() {
+		staticItems = append(staticItems,
+			components.PaletteItem{Label: "Player", IsHeader: true},
+			components.PaletteItem{Label: "Play / Pause", Action: components.ActionTogglePlay},
+			components.PaletteItem{Label: "Seek Forward", Action: components.ActionSeekForward},
+			components.PaletteItem{Label: "Seek Backward", Action: components.ActionSeekBackward},
+			components.PaletteItem{Label: "Speed Up", Action: components.ActionSpeedUp},
+			components.PaletteItem{Label: "Speed Down", Action: components.ActionSpeedDown},
+			components.PaletteItem{Label: "Volume Up", Action: components.ActionVolumeUp},
+			components.PaletteItem{Label: "Volume Down", Action: components.ActionVolumeDown},
+			components.PaletteItem{Label: "Next Track", Action: components.ActionNextChapter},
+			components.PaletteItem{Label: "Previous Track", Action: components.ActionPrevChapter},
+			components.PaletteItem{Label: "Sleep Timer", IsHeader: true},
+			components.PaletteItem{Label: "Sleep Timer: 15m", Action: components.ActionSleep15},
+			components.PaletteItem{Label: "Sleep Timer: 30m", Action: components.ActionSleep30},
+			components.PaletteItem{Label: "Sleep Timer: 45m", Action: components.ActionSleep45},
+			components.PaletteItem{Label: "Sleep Timer: 60m", Action: components.ActionSleep60},
+			components.PaletteItem{Label: "Sleep Timer: Off", Action: components.ActionSleepOff},
+		)
+	}
+	if len(m.tracks) > 0 {
+		staticItems = append(staticItems,
+			components.PaletteItem{Label: "Queue", IsHeader: true},
+			components.PaletteItem{Label: "Shuffle Queue", Action: components.ActionShuffleQueue},
+			components.PaletteItem{Label: "Repeat Current Track", Action: components.ActionRepeatTrack},
+			components.PaletteItem{Label: "Repeat Queue", Action: components.ActionRepeatQueue},
+			components.PaletteItem{Label: "Clear Queue", Action: components.ActionClearQueue},
+		)
 	}
 	m.palette.Open(staticItems, m.contentSearchFunc())
+}
+
+func (m Model) contextPaletteItems() []components.PaletteItem {
+	switch m.screen {
+	case ScreenLibrary:
+		if m.libraryScreen.CurrentLevel() == library.LevelAlbums {
+			if album, ok := m.libraryScreen.SelectedAlbum(); ok {
+				return []components.PaletteItem{
+					{Label: "Context Actions", IsHeader: true},
+					{Label: "Open Selected", Action: components.ActionOpenSelected, ItemID: album.ID, Data: album},
+					{Label: "Add Album to Queue", Action: components.ActionQueueItem, ItemID: album.ID, Data: album},
+					{Label: "Shuffle Album to Queue", Action: components.ActionShuffleItem, ItemID: album.ID, Data: album},
+					{Label: "Edit Metadata", Action: components.ActionEditMetadata, ItemID: album.ID, Data: album},
+				}
+			}
+		}
+		if track, ok := m.libraryScreen.SelectedTrack(); ok {
+			return []components.PaletteItem{
+				{Label: "Context Actions", IsHeader: true},
+				{Label: "Play Selected", Action: components.ActionPlayDirect, ItemID: track.ID, Data: track},
+				{Label: "Add Track to Queue", Action: components.ActionQueueItem, ItemID: track.ID, Data: track},
+				{Label: "Edit Metadata", Action: components.ActionEditMetadata, ItemID: track.ID, Data: track},
+			}
+		}
+	case ScreenPlaylists:
+		if m.playlistsScreen.CurrentLevel() == playlists.LevelPlaylists {
+			if playlist, ok := m.playlistsScreen.SelectedPlaylist(); ok {
+				return []components.PaletteItem{
+					{Label: "Context Actions", IsHeader: true},
+					{Label: "Open Selected", Action: components.ActionOpenSelected, ItemID: playlist.ID, Data: playlist},
+					{Label: "Add Playlist to Queue", Action: components.ActionQueueItem, ItemID: playlist.ID, Data: playlist},
+					{Label: "Shuffle Playlist to Queue", Action: components.ActionShuffleItem, ItemID: playlist.ID, Data: playlist},
+				}
+			}
+		}
+		if track, ok := m.playlistsScreen.SelectedTrack(); ok {
+			return []components.PaletteItem{
+				{Label: "Context Actions", IsHeader: true},
+				{Label: "Play Selected", Action: components.ActionPlayDirect, ItemID: track.ID, Data: track},
+				{Label: "Add Track to Queue", Action: components.ActionQueueItem, ItemID: track.ID, Data: track},
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Model) contentSearchFunc() components.SearchFunc {
@@ -909,6 +1006,17 @@ func (m *Model) contentSearchFunc() components.SearchFunc {
 					Action: components.ActionOpenSelected,
 					ItemID: a.ID,
 					Data:   a,
+				})
+			}
+		}
+
+		for _, p := range m.playlistsScreen.Playlists() {
+			if strings.Contains(strings.ToLower(p.Name), query) {
+				results = append(results, components.PaletteItem{
+					Label:  fmt.Sprintf("Playlist: %s", p.Name),
+					Action: components.ActionOpenSelected,
+					ItemID: p.ID,
+					Data:   p,
 				})
 			}
 		}
@@ -948,14 +1056,72 @@ func (m Model) handlePaletteAction(action components.PaletteAction, itemID strin
 	case components.ActionGoLibrary:
 		m.screen = ScreenLibrary
 		return m, nil
+	case components.ActionGoPlaylists:
+		return m.navigate(ScreenPlaylists)
 	case components.ActionShowQueue:
 		m.screen = ScreenQueue
 		return m, nil
 	case components.ActionTogglePlay:
+		if !m.IsPlaying() {
+			return m, nil
+		}
 		m.playerState.Playing = !m.playerState.Playing
 		m.syncQueueScreen()
 		if m.mpv != nil {
 			return m, player.TogglePauseCmd(m.mpv, m.playerState.Playing)
+		}
+		return m, nil
+	case components.ActionSeekForward:
+		seek := 10.0
+		if m.cfg != nil && m.cfg.Player.SeekSeconds != 0 {
+			seek = float64(m.cfg.Player.SeekSeconds)
+		}
+		if seek == 0 {
+			seek = 10
+		}
+		return m.handleSeek(seek)
+	case components.ActionSeekBackward:
+		seek := 10.0
+		if m.cfg != nil && m.cfg.Player.SeekSeconds != 0 {
+			seek = float64(m.cfg.Player.SeekSeconds)
+		}
+		if seek == 0 {
+			seek = 10
+		}
+		return m.handleSeek(-seek)
+	case components.ActionSpeedUp:
+		m.playerState.Speed = math.Round((m.playerState.Speed+0.1)*10) / 10
+		m.syncQueueScreen()
+		if m.mpv != nil {
+			return m, player.SetSpeedCmd(m.mpv, m.playerState.Speed)
+		}
+		return m, nil
+	case components.ActionSpeedDown:
+		newSpeed := math.Round((m.playerState.Speed-0.1)*10) / 10
+		if newSpeed >= 0.1 {
+			m.playerState.Speed = newSpeed
+		}
+		m.syncQueueScreen()
+		if m.mpv != nil {
+			return m, player.SetSpeedCmd(m.mpv, m.playerState.Speed)
+		}
+		return m, nil
+	case components.ActionVolumeUp:
+		if m.playerState.Volume < 150 {
+			m.playerState.Volume += 5
+		}
+		m.syncQueueScreen()
+		if m.mpv != nil {
+			return m, player.SetVolumeCmd(m.mpv, m.playerState.Volume)
+		}
+		return m, nil
+	case components.ActionVolumeDown:
+		if m.playerState.Volume > 0 {
+			m.playerState.Volume -= 5
+		}
+		m.syncQueueScreen()
+		if m.mpv != nil {
+			return m, player.SetVolumeCmd(m.mpv, m.playerState.Volume)
 		}
 		return m, nil
 	case components.ActionNextChapter:
@@ -977,10 +1143,105 @@ func (m Model) handlePaletteAction(action components.PaletteAction, itemID strin
 	case components.ActionClearQueue:
 		newM, _ := m.Update(queue.QueueActionMsg{Action: "clear"})
 		return newM, nil
+	case components.ActionShuffleQueue:
+		newM, _ := m.Update(queue.QueueActionMsg{Action: "shuffle"})
+		return newM, nil
+	case components.ActionRepeatTrack:
+		if m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+			newM, _ := m.Update(queue.QueueActionMsg{
+				Action:  "repeat_track",
+				Index:   m.currentIndex,
+				TrackID: m.tracks[m.currentIndex].ID,
+			})
+			return newM, nil
+		}
+		return m, nil
+	case components.ActionRepeatQueue:
+		newM, _ := m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
+		return newM, nil
+	case components.ActionQueueItem:
+		switch item := data.(type) {
+		case jellyfin.Track:
+			newM, cmd := m.Update(library.AddTrackToQueueMsg{Track: item})
+			return newM, cmd
+		case jellyfin.Album:
+			if m.client == nil {
+				return m, nil
+			}
+			client := m.client
+			return m, func() tea.Msg {
+				tracks, err := client.GetTracks(context.Background(), item.ID)
+				if err != nil || len(tracks) == 0 {
+					return nil
+				}
+				return library.AddTracksToQueueMsg{Tracks: tracks}
+			}
+		case jellyfin.Playlist:
+			if m.client == nil {
+				return m, nil
+			}
+			client := m.client
+			return m, func() tea.Msg {
+				tracks, err := client.GetPlaylistTracks(context.Background(), item.ID)
+				if err != nil || len(tracks) == 0 {
+					return nil
+				}
+				return library.AddTracksToQueueMsg{Tracks: tracks}
+			}
+		}
+		return m, nil
+	case components.ActionShuffleItem:
+		switch item := data.(type) {
+		case jellyfin.Track:
+			newM, cmd := m.Update(library.AddTrackToQueueMsg{Track: item})
+			return newM, cmd
+		case jellyfin.Album:
+			if m.client == nil {
+				return m, nil
+			}
+			client := m.client
+			return m, func() tea.Msg {
+				tracks, err := client.GetTracks(context.Background(), item.ID)
+				if err != nil || len(tracks) == 0 {
+					return nil
+				}
+				return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
+			}
+		case jellyfin.Playlist:
+			if m.client == nil {
+				return m, nil
+			}
+			client := m.client
+			return m, func() tea.Msg {
+				tracks, err := client.GetPlaylistTracks(context.Background(), item.ID)
+				if err != nil || len(tracks) == 0 {
+					return nil
+				}
+				return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
+			}
+		}
+		return m, nil
+	case components.ActionEditMetadata:
+		switch item := data.(type) {
+		case jellyfin.Track:
+			m.metadataEditScreen = metadataedit.New(m.styles, m.client, item.ID, "Track", &item, nil)
+			m.metadataEditScreen.SetSize(m.width, m.screenHeight())
+			return m.navigate(ScreenMetadataEdit)
+		case jellyfin.Album:
+			m.metadataEditScreen = metadataedit.New(m.styles, m.client, item.ID, "Album", nil, &item)
+			m.metadataEditScreen.SetSize(m.width, m.screenHeight())
+			return m.navigate(ScreenMetadataEdit)
+		}
+		return m, nil
 	case components.ActionOpenSelected:
 		if album, ok := data.(jellyfin.Album); ok {
 			m.screen = ScreenLibrary
 			cmd := m.libraryScreen.SelectAlbum(album)
+			return m, cmd
+		}
+		if playlist, ok := data.(jellyfin.Playlist); ok {
+			m.screen = ScreenPlaylists
+			cmd := m.playlistsScreen.SelectPlaylist(playlist)
 			return m, cmd
 		}
 	case components.ActionPlayDirect:
