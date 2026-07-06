@@ -20,7 +20,6 @@ import (
 	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/zalando/go-keyring"
 )
 
 func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
@@ -159,8 +158,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	}
 }
 
-func TestAppModel_LoginSuccessStoresTokenInKeychain(t *testing.T) {
-	keyring.MockInit()
+func TestAppModel_LoginSuccessStoresObfuscatedTokenInConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	cfg := config.Default()
@@ -174,20 +172,22 @@ func TestAppModel_LoginSuccessStoresTokenInKeychain(t *testing.T) {
 	})
 	m = newM.(Model)
 
-	token, err := secrets.GetToken("https://jellyfin.example.com", "alice")
+	if m.cfg.Server.Token == "" {
+		t.Fatal("expected token in config")
+	}
+	if m.cfg.Server.Token == "tok-1" || strings.Contains(m.cfg.Server.Token, "tok-1") {
+		t.Fatalf("expected obfuscated config token, got %q", m.cfg.Server.Token)
+	}
+	token, err := secrets.DecodeToken("https://jellyfin.example.com", "alice", m.cfg.Server.Token)
 	if err != nil {
-		t.Fatalf("expected token in keychain: %v", err)
+		t.Fatalf("DecodeToken returned error: %v", err)
 	}
 	if token != "tok-1" {
 		t.Fatalf("expected token %q, got %q", "tok-1", token)
 	}
-	if m.cfg.Server.Token != "" {
-		t.Fatalf("expected config token cleared, got %q", m.cfg.Server.Token)
-	}
 }
 
-func TestAppModel_InitMigratesPlaintextTokenToKeychain(t *testing.T) {
-	keyring.MockInit()
+func TestAppModel_InitMigratesPlaintextTokenToObfuscatedConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	cfg := config.Default()
@@ -207,15 +207,15 @@ func TestAppModel_InitMigratesPlaintextTokenToKeychain(t *testing.T) {
 		t.Fatalf("expected migrated token, got %q", success.Token)
 	}
 
-	token, err := secrets.GetToken("https://jellyfin.example.com", "alice")
+	if cfg.Server.Token == "old-token" || strings.Contains(cfg.Server.Token, "old-token") {
+		t.Fatalf("expected obfuscated config token, got %q", cfg.Server.Token)
+	}
+	token, err := secrets.DecodeToken("https://jellyfin.example.com", "alice", cfg.Server.Token)
 	if err != nil {
-		t.Fatalf("expected token in keychain: %v", err)
+		t.Fatalf("DecodeToken returned error: %v", err)
 	}
 	if token != "old-token" {
 		t.Fatalf("expected token %q, got %q", "old-token", token)
-	}
-	if cfg.Server.Token != "" {
-		t.Fatalf("expected plaintext token cleared, got %q", cfg.Server.Token)
 	}
 }
 
