@@ -232,12 +232,13 @@ func (m Model) savedLoginCmd() tea.Cmd {
 		token, err := secrets.DecodeToken(cfg.Server.Address, cfg.Server.Username, cfg.Server.Token)
 		if err != nil {
 			logger.Warn("failed to decode stored token", "err", err)
-			return nil
+			clearSavedAuth(cfg)
+			return login.LoginFailedMsg{Err: fmt.Errorf("saved login expired; login again")}
 		}
 		if token == "" {
 			return nil
 		}
-		if !secrets.IsObfuscatedToken(cfg.Server.Token) {
+		if !secrets.IsCurrentToken(cfg.Server.Token) {
 			cfg.Server.Token = secrets.EncodeToken(cfg.Server.Address, cfg.Server.Username, token)
 			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *cfg); err != nil {
 				logger.Warn("failed to save obfuscated token", "err", err)
@@ -250,6 +251,30 @@ func (m Model) savedLoginCmd() tea.Cmd {
 			UserID:    cfg.Server.UserID,
 		}
 	}
+}
+
+func clearSavedAuth(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	cfg.Server.Token = ""
+	cfg.Server.UserID = ""
+	if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *cfg); err != nil {
+		logger.Warn("failed to clear saved auth", "err", err)
+	}
+}
+
+func (m Model) clearSavedLogin(err error) (tea.Model, tea.Cmd) {
+	logger.Warn("saved login rejected, clearing stored token", "err", err)
+	clearSavedAuth(m.cfg)
+	m.client = nil
+	m.playlistsScreen.SetClient(nil)
+	m.screen = ScreenLogin
+	m.backStack = nil
+	m.err.Dismiss()
+	var cmd tea.Cmd
+	m.loginScreen, cmd = m.loginScreen.Update(login.LoginFailedMsg{Err: fmt.Errorf("saved login expired; login again")})
+	return m, tea.Batch(cmd, m.loginScreen.Init())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -471,6 +496,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.libraryScreen.SetLibraries(m.client, msg.libraries)
 			m.screen = ScreenLibrary
 			return m, tea.Batch(m.libraryScreen.Init(), m.libraryScreen.FetchAllTracksCmd(), m.playlistsScreen.Init())
+		}
+		if components.IsUnauthorized(msg.err) {
+			return m.clearSavedLogin(msg.err)
 		}
 
 	case playlists.PlaylistsLoadedMsg, playlists.PlaylistTracksLoadedMsg:
