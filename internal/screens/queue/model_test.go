@@ -117,3 +117,54 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 		t.Errorf("unexpected msg: %+v", msg)
 	}
 }
+
+func TestQueueModel_SetQueuePreservesCursorOnPlaybackProbe(t *testing.T) {
+	tracks := []jellyfin.Track{
+		{ID: "t-1", Name: "Track 1"},
+		{ID: "t-2", Name: "Track 2"},
+		{ID: "t-3", Name: "Track 3"},
+	}
+
+	m := New(ui.DefaultStyles())
+	m.SetSize(80, 24)
+	m.SetQueue(tracks, 0)
+
+	var cmd tea.Cmd
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd != nil {
+		_ = cmd()
+	}
+	m.SetQueue(tracks, 0)
+
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected jump cmd")
+	}
+	msg := cmd()
+	if jqm, ok := msg.(JumpQueueMsg); !ok || jqm.Index != 1 {
+		t.Fatalf("expected cursor to stay on index 1, got %+v", msg)
+	}
+}
+
+func TestQueueModel_SetQueueSelectsNewCurrentTrack(t *testing.T) {
+	tracks := []jellyfin.Track{
+		{ID: "t-1", Name: "Track 1"},
+		{ID: "t-2", Name: "Track 2"},
+		{ID: "t-3", Name: "Track 3"},
+	}
+
+	m := New(ui.DefaultStyles())
+	m.SetSize(80, 24)
+	m.SetQueue(tracks, 0)
+
+	m.SetQueue(tracks, 2)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected jump cmd")
+	}
+	msg := cmd()
+	if jqm, ok := msg.(JumpQueueMsg); !ok || jqm.Index != 2 {
+		t.Fatalf("expected new current index selected, got %+v", msg)
+	}
+}

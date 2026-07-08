@@ -78,6 +78,8 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
+	oldTracks := m.tracks
+	oldCurrentIndex := m.currentIndex
 	m.tracks = tracks
 	m.currentIndex = currentIndex
 	items := make([]list.Item, len(tracks))
@@ -90,10 +92,25 @@ func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
 	}
 	cmd := m.list.SetItems(items)
 	_ = cmd // SetItems returns cmd for spinner/etc if needed
-	if !m.HasActiveFilter() && currentIndex >= 0 && currentIndex < len(tracks) {
+	if !m.HasActiveFilter() && shouldSelectCurrent(oldTracks, tracks, oldCurrentIndex, currentIndex) {
 		m.list.Select(currentIndex)
 	}
 	m.updateListSize()
+}
+
+func shouldSelectCurrent(oldTracks, newTracks []jellyfin.Track, oldCurrentIndex, newCurrentIndex int) bool {
+	if newCurrentIndex < 0 || newCurrentIndex >= len(newTracks) {
+		return false
+	}
+	if oldCurrentIndex != newCurrentIndex || len(oldTracks) != len(newTracks) {
+		return true
+	}
+	for i := range newTracks {
+		if oldTracks[i].ID != newTracks[i].ID {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) SetPlaybackState(isPlaying, isPaused bool, position, duration float64) {
