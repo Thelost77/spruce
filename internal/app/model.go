@@ -19,7 +19,6 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/metadataedit"
 	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/Thelost77/spruce/internal/screens/queue"
-	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui"
 	"github.com/Thelost77/spruce/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -220,61 +219,17 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.cfg != nil && m.cfg.Server.Address != "" && m.cfg.Server.UserID != "" {
-		return m.savedLoginCmd()
-	}
-	return m.loginScreen.Init()
-}
-
-func (m Model) savedLoginCmd() tea.Cmd {
-	cfg := m.cfg
-	return func() tea.Msg {
-		token, err := secrets.DecodeToken(cfg.Server.Address, cfg.Server.Username, cfg.Server.Token)
-		if err != nil {
-			logger.Warn("failed to decode stored token", "err", err)
-			clearSavedAuth(cfg)
-			return login.LoginFailedMsg{Err: fmt.Errorf("saved login expired; login again")}
-		}
-		if token == "" {
-			return nil
-		}
-		if !secrets.IsCurrentToken(cfg.Server.Token) {
-			cfg.Server.Token = secrets.EncodeToken(cfg.Server.Address, cfg.Server.Username, token)
-			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *cfg); err != nil {
-				logger.Warn("failed to save obfuscated token", "err", err)
+	if m.cfg != nil && m.cfg.Server.Address != "" && m.cfg.Server.Token != "" && m.cfg.Server.UserID != "" {
+		return func() tea.Msg {
+			return login.LoginSuccessMsg{
+				Token:     m.cfg.Server.Token,
+				ServerURL: m.cfg.Server.Address,
+				Username:  m.cfg.Server.Username,
+				UserID:    m.cfg.Server.UserID,
 			}
 		}
-		return login.LoginSuccessMsg{
-			Token:     token,
-			ServerURL: cfg.Server.Address,
-			Username:  cfg.Server.Username,
-			UserID:    cfg.Server.UserID,
-		}
 	}
-}
-
-func clearSavedAuth(cfg *config.Config) {
-	if cfg == nil {
-		return
-	}
-	cfg.Server.Token = ""
-	cfg.Server.UserID = ""
-	if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *cfg); err != nil {
-		logger.Warn("failed to clear saved auth", "err", err)
-	}
-}
-
-func (m Model) clearSavedLogin(err error) (tea.Model, tea.Cmd) {
-	logger.Warn("saved login rejected, clearing stored token", "err", err)
-	clearSavedAuth(m.cfg)
-	m.client = nil
-	m.playlistsScreen.SetClient(nil)
-	m.screen = ScreenLogin
-	m.backStack = nil
-	m.err.Dismiss()
-	var cmd tea.Cmd
-	m.loginScreen, cmd = m.loginScreen.Update(login.LoginFailedMsg{Err: fmt.Errorf("saved login expired; login again")})
-	return m, tea.Batch(cmd, m.loginScreen.Init())
+	return m.loginScreen.Init()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -474,11 +429,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cfg != nil {
 			m.cfg.Server.Address = msg.ServerURL
 			m.cfg.Server.Username = msg.Username
+			m.cfg.Server.Token = msg.Token
 			m.cfg.Server.UserID = msg.UserID
-			m.cfg.Server.Token = secrets.EncodeToken(msg.ServerURL, msg.Username, msg.Token)
-			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg); err != nil {
-				logger.Warn("failed to save config", "err", err)
-			}
+			_ = config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg)
 		}
 		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID)
 		m.playlistsScreen.SetClient(m.client)
@@ -496,9 +449,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.libraryScreen.SetLibraries(m.client, msg.libraries)
 			m.screen = ScreenLibrary
 			return m, tea.Batch(m.libraryScreen.Init(), m.libraryScreen.FetchAllTracksCmd(), m.playlistsScreen.Init())
-		}
-		if components.IsUnauthorized(msg.err) {
-			return m.clearSavedLogin(msg.err)
 		}
 
 	case playlists.PlaylistsLoadedMsg, playlists.PlaylistTracksLoadedMsg:

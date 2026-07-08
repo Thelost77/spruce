@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Thelost77/spruce/internal/config"
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/mpris"
 	"github.com/Thelost77/spruce/internal/player"
@@ -17,7 +16,6 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/login"
 	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/Thelost77/spruce/internal/screens/queue"
-	"github.com/Thelost77/spruce/internal/secrets"
 	"github.com/Thelost77/spruce/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -155,104 +153,6 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	v := m.View()
 	if v == "" {
 		t.Error("expected non-empty view")
-	}
-}
-
-func TestAppModel_LoginSuccessStoresObfuscatedTokenInConfig(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	cfg := config.Default()
-	m := New(&cfg, nil)
-
-	newM, _ := m.Update(login.LoginSuccessMsg{
-		Token:     "tok-1",
-		ServerURL: "https://jellyfin.example.com",
-		Username:  "alice",
-		UserID:    "usr-1",
-	})
-	m = newM.(Model)
-
-	if m.cfg.Server.Token == "" {
-		t.Fatal("expected token in config")
-	}
-	if m.cfg.Server.Token == "tok-1" || strings.Contains(m.cfg.Server.Token, "tok-1") {
-		t.Fatalf("expected obfuscated config token, got %q", m.cfg.Server.Token)
-	}
-	token, err := secrets.DecodeToken("https://jellyfin.example.com", "alice", m.cfg.Server.Token)
-	if err != nil {
-		t.Fatalf("DecodeToken returned error: %v", err)
-	}
-	if token != "tok-1" {
-		t.Fatalf("expected token %q, got %q", "tok-1", token)
-	}
-}
-
-func TestAppModel_InitMigratesPlaintextTokenToObfuscatedConfig(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	cfg := config.Default()
-	cfg.Server.Address = "https://jellyfin.example.com"
-	cfg.Server.Username = "alice"
-	cfg.Server.Token = "old-token"
-	cfg.Server.UserID = "usr-1"
-	m := New(&cfg, nil)
-
-	cmd := m.Init()
-	msg := cmd()
-	success, ok := msg.(login.LoginSuccessMsg)
-	if !ok {
-		t.Fatalf("expected LoginSuccessMsg, got %T", msg)
-	}
-	if success.Token != "old-token" {
-		t.Fatalf("expected migrated token, got %q", success.Token)
-	}
-
-	if cfg.Server.Token == "old-token" || strings.Contains(cfg.Server.Token, "old-token") {
-		t.Fatalf("expected obfuscated config token, got %q", cfg.Server.Token)
-	}
-	if !strings.HasPrefix(cfg.Server.Token, "spruce:v2:") {
-		t.Fatalf("expected v2 obfuscated config token, got %q", cfg.Server.Token)
-	}
-	token, err := secrets.DecodeToken("https://jellyfin.example.com", "alice", cfg.Server.Token)
-	if err != nil {
-		t.Fatalf("DecodeToken returned error: %v", err)
-	}
-	if token != "old-token" {
-		t.Fatalf("expected token %q, got %q", "old-token", token)
-	}
-}
-
-func TestAppModel_UnauthorizedSavedLoginClearsStoredAuth(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	cfg := config.Default()
-	cfg.Server.Address = "https://jellyfin.example.com"
-	cfg.Server.Username = "alice"
-	cfg.Server.Token = secrets.EncodeToken(cfg.Server.Address, cfg.Server.Username, "bad-token")
-	cfg.Server.UserID = "usr-1"
-	m := New(&cfg, nil)
-	m.screen = ScreenLibrary
-	m.client = jellyfin.NewClient(cfg.Server.Address, "bad-token", cfg.Server.UserID)
-
-	newM, _ := m.Update(musicLibrariesLoadedMsg{err: errors.New("unexpected status 401: Unauthorized")})
-	m = newM.(Model)
-
-	if m.screen != ScreenLogin {
-		t.Fatalf("screen = %v, want ScreenLogin", m.screen)
-	}
-	if m.client != nil {
-		t.Fatal("expected client cleared")
-	}
-	if cfg.Server.Token != "" || cfg.Server.UserID != "" {
-		t.Fatalf("expected saved auth cleared, token=%q userID=%q", cfg.Server.Token, cfg.Server.UserID)
-	}
-
-	saved, err := config.Load(config.ConfigDir() + "/config.toml")
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	if saved.Server.Token != "" || saved.Server.UserID != "" {
-		t.Fatalf("expected saved config auth cleared, token=%q userID=%q", saved.Server.Token, saved.Server.UserID)
 	}
 }
 
