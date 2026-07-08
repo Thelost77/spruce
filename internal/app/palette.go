@@ -15,6 +15,7 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/Thelost77/spruce/internal/screens/queue"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/sahilm/fuzzy"
 )
 
 func (m *Model) openCommandPalette() {
@@ -106,33 +107,33 @@ func (m *Model) contentSearchFunc() components.SearchFunc {
 		if query == "" {
 			return nil
 		}
-		query = strings.ToLower(query)
-		var results []components.PaletteItem
+		var candidates []components.PaletteItem
+		var texts []string
 
 		for _, a := range m.libraryScreen.Albums() {
-			if strings.Contains(strings.ToLower(a.Name), query) {
-				artist := "Unknown Artist"
-				if len(a.Artists) > 0 {
-					artist = strings.Join(a.Artists, ", ")
-				}
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Album: %s — %s", a.Name, artist),
-					Action: components.ActionOpenSelected,
-					ItemID: a.ID,
-					Data:   a,
-				})
+			artist := "Unknown Artist"
+			if len(a.Artists) > 0 {
+				artist = strings.Join(a.Artists, ", ")
 			}
+			label := fmt.Sprintf("Album: %s — %s", a.Name, artist)
+			candidates = append(candidates, components.PaletteItem{
+				Label:  label,
+				Action: components.ActionOpenSelected,
+				ItemID: a.ID,
+				Data:   a,
+			})
+			texts = append(texts, label)
 		}
 
 		for _, p := range m.playlistsScreen.Playlists() {
-			if strings.Contains(strings.ToLower(p.Name), query) {
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Playlist: %s", p.Name),
-					Action: components.ActionOpenSelected,
-					ItemID: p.ID,
-					Data:   p,
-				})
-			}
+			label := fmt.Sprintf("Playlist: %s", p.Name)
+			candidates = append(candidates, components.PaletteItem{
+				Label:  label,
+				Action: components.ActionOpenSelected,
+				ItemID: p.ID,
+				Data:   p,
+			})
+			texts = append(texts, label)
 		}
 
 		tracksToSearch := m.libraryScreen.AllTracks()
@@ -140,27 +141,32 @@ func (m *Model) contentSearchFunc() components.SearchFunc {
 			tracksToSearch = m.libraryScreen.Tracks()
 		}
 		for _, t := range tracksToSearch {
-			if strings.Contains(strings.ToLower(t.Name), query) || strings.Contains(strings.ToLower(t.DisplayArtist()), query) {
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Track: %s — %s", t.Name, t.DisplayArtist()),
-					Action: components.ActionPlayDirect,
-					ItemID: t.ID,
-					Data:   t,
-				})
-			}
+			label := fmt.Sprintf("Track: %s — %s", t.Name, t.DisplayArtist())
+			candidates = append(candidates, components.PaletteItem{
+				Label:  label,
+				Action: components.ActionPlayDirect,
+				ItemID: t.ID,
+				Data:   t,
+			})
+			texts = append(texts, label)
 		}
 
 		for _, t := range m.tracks {
-			if strings.Contains(strings.ToLower(t.Name), query) || strings.Contains(strings.ToLower(t.DisplayArtist()), query) {
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Queue: %s — %s", t.Name, t.DisplayArtist()),
-					Action: components.ActionPlayDirect,
-					ItemID: t.ID,
-					Data:   t,
-				})
-			}
+			label := fmt.Sprintf("Queue: %s — %s", t.Name, t.DisplayArtist())
+			candidates = append(candidates, components.PaletteItem{
+				Label:  label,
+				Action: components.ActionPlayDirect,
+				ItemID: t.ID,
+				Data:   t,
+			})
+			texts = append(texts, label)
 		}
 
+		matches := fuzzy.Find(query, texts)
+		results := make([]components.PaletteItem, len(matches))
+		for i, match := range matches {
+			results[i] = candidates[match.Index]
+		}
 		return results
 	}
 }
