@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Thelost77/spruce/internal/config"
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/mpris"
 	"github.com/Thelost77/spruce/internal/player"
@@ -18,6 +19,7 @@ import (
 	"github.com/Thelost77/spruce/internal/screens/queue"
 	"github.com/Thelost77/spruce/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
@@ -153,6 +155,83 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	v := m.View()
 	if v == "" {
 		t.Error("expected non-empty view")
+	}
+}
+
+func TestNewAppliesConfiguredTheme(t *testing.T) {
+	cfg := config.Default()
+	cfg.Theme.Foreground = "#111111"
+	cfg.Theme.Accent = "#222222"
+	cfg.Theme.Selected = "#333333"
+
+	m := New(&cfg, nil)
+
+	if got := m.styles.Accent.GetForeground(); got != lipgloss.Color("#222222") {
+		t.Fatalf("expected configured accent, got %v", got)
+	}
+	if got := m.styles.Selected.GetForeground(); got != lipgloss.Color("#111111") {
+		t.Fatalf("expected configured selected foreground, got %v", got)
+	}
+	if got := m.styles.Selected.GetBackground(); got != lipgloss.Color("#333333") {
+		t.Fatalf("expected configured selected background, got %v", got)
+	}
+}
+
+func TestNewWithSavedLoginStartsAtLibrary(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.Address = "https://jellyfin.example.com"
+	cfg.Server.Username = "alice"
+	cfg.Server.Token = "tok-1"
+	cfg.Server.UserID = "usr-1"
+
+	m := New(&cfg, nil)
+
+	if m.screen != ScreenLibrary {
+		t.Fatalf("expected saved login to start at library, got %v", m.screen)
+	}
+	if m.client == nil {
+		t.Fatal("expected client from saved login")
+	}
+	if m.client.BaseURL() != "https://jellyfin.example.com" {
+		t.Fatalf("expected saved server URL, got %q", m.client.BaseURL())
+	}
+	if m.client.Token() != "tok-1" || m.client.UserID() != "usr-1" {
+		t.Fatalf("unexpected saved credentials: token=%q user=%q", m.client.Token(), m.client.UserID())
+	}
+}
+
+func TestInitWithSavedLoginFetchesLibrariesWithoutLoginScreen(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Users/usr-1/Views" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(struct{ Items []jellyfin.Library }{
+			Items: []jellyfin.Library{{ID: "lib-1", Name: "Music", CollectionType: "music"}},
+		})
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Server.Address = server.URL
+	cfg.Server.Token = "tok-1"
+	cfg.Server.UserID = "usr-1"
+
+	m := New(&cfg, nil)
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("expected saved login init command")
+	}
+
+	msg := cmd()
+	libsMsg, ok := msg.(musicLibrariesLoadedMsg)
+	if !ok {
+		t.Fatalf("expected musicLibrariesLoadedMsg, got %T", msg)
+	}
+	if libsMsg.err != nil {
+		t.Fatalf("expected libraries without error: %v", libsMsg.err)
+	}
+	if len(libsMsg.libraries) != 1 || libsMsg.libraries[0].ID != "lib-1" {
+		t.Fatalf("unexpected libraries: %+v", libsMsg.libraries)
 	}
 }
 

@@ -87,7 +87,6 @@ type MprisState struct {
 }
 
 func New(cfg *config.Config, mpv *player.Mpv) Model {
-	styles := ui.DefaultStyles()
 	actualCfg := config.Default()
 	if cfg != nil {
 		if cfg.Player.Speed != 0 {
@@ -142,21 +141,31 @@ func New(cfg *config.Config, mpv *player.Mpv) Model {
 			actualCfg.Keybinds.Back = cfg.Keybinds.Back
 		}
 	}
+	styles := ui.NewStyles(actualCfg.Theme)
 	var p player.Player
 	if mpv != nil {
 		p = mpv
 	}
 	pal := components.NewPalette()
 	pal.SetStyles(styles)
+	playlistsScreen := playlists.New(styles)
+	initialScreen := ScreenLogin
+	var client *jellyfin.Client
+	if hasSavedLogin(actualCfg) {
+		client = jellyfin.NewClient(actualCfg.Server.Address, actualCfg.Server.Token, actualCfg.Server.UserID)
+		playlistsScreen.SetClient(client)
+		initialScreen = ScreenLibrary
+	}
 	return Model{
-		screen:          ScreenLogin,
+		screen:          initialScreen,
 		keys:            DefaultKeyMap(actualCfg.Keybinds),
 		loginScreen:     login.New(styles),
 		libraryScreen:   library.New(styles),
-		playlistsScreen: playlists.New(styles),
+		playlistsScreen: playlistsScreen,
 		queueScreen:     queue.New(styles),
 		palette:         pal,
 		help:            components.NewHelpOverlay(styles),
+		client:          client,
 		cfg:             cfg,
 		mpv:             mpv,
 		mprisState:      &MprisState{},
@@ -165,6 +174,10 @@ func New(cfg *config.Config, mpv *player.Mpv) Model {
 		currentIndex:    -1,
 		styles:          styles,
 	}
+}
+
+func hasSavedLogin(cfg config.Config) bool {
+	return cfg.Server.Address != "" && cfg.Server.Token != "" && cfg.Server.UserID != ""
 }
 
 func (m *Model) SetProgram(p *tea.Program) {
@@ -219,17 +232,18 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.cfg != nil && m.cfg.Server.Address != "" && m.cfg.Server.Token != "" && m.cfg.Server.UserID != "" {
-		return func() tea.Msg {
-			return login.LoginSuccessMsg{
-				Token:     m.cfg.Server.Token,
-				ServerURL: m.cfg.Server.Address,
-				Username:  m.cfg.Server.Username,
-				UserID:    m.cfg.Server.UserID,
-			}
-		}
+	if m.client != nil {
+		return m.fetchMusicLibrariesCmd()
 	}
 	return m.loginScreen.Init()
+}
+
+func (m Model) fetchMusicLibrariesCmd() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		libs, err := client.GetMusicLibraries(context.Background())
+		return musicLibrariesLoadedMsg{libraries: libs, err: err}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -435,14 +449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID)
 		m.playlistsScreen.SetClient(m.client)
-		client := m.client
-		fetchLibsCmd := func() tea.Msg {
-			libs, err := client.GetMusicLibraries(context.Background())
-			return musicLibrariesLoadedMsg{libraries: libs, err: err}
-		}
 		var cmd tea.Cmd
 		m.loginScreen, cmd = m.loginScreen.Update(msg)
-		return m, tea.Batch(cmd, fetchLibsCmd)
+		return m, tea.Batch(cmd, m.fetchMusicLibrariesCmd())
 
 	case musicLibrariesLoadedMsg:
 		if msg.err == nil && len(msg.libraries) > 0 {
