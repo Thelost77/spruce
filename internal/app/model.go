@@ -3,10 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
-	"math"
 	"math/rand"
 	"path/filepath"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/config"
@@ -74,6 +73,7 @@ type Model struct {
 }
 
 type MprisState struct {
+	mu        sync.RWMutex
 	IsPlaying bool
 	IsPaused  bool
 	Title     string
@@ -86,7 +86,7 @@ type MprisState struct {
 	QueueLen  int
 }
 
-func New(cfg *config.Config, mpv *player.Mpv) Model {
+func New(cfg *config.Config, mpv *player.Mpv) *Model {
 	actualCfg := config.Default()
 	if cfg != nil {
 		if cfg.Player.Speed != 0 {
@@ -156,7 +156,7 @@ func New(cfg *config.Config, mpv *player.Mpv) Model {
 		playlistsScreen.SetClient(client)
 		initialScreen = ScreenLibrary
 	}
-	return Model{
+	return &Model{
 		screen:          initialScreen,
 		keys:            DefaultKeyMap(actualCfg.Keybinds),
 		loginScreen:     login.New(styles),
@@ -200,7 +200,7 @@ func (m *Model) Cleanup() {
 }
 
 // screenHeight returns the available height for screen content.
-func (m Model) screenHeight() int {
+func (m *Model) screenHeight() int {
 	h := m.height
 	h -= headerHeight
 	if m.err.HasError() {
@@ -231,14 +231,14 @@ func (m *Model) SetSize(width, height int) {
 	m.help.SetSize(width, height)
 }
 
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	if m.client != nil {
 		return m.fetchMusicLibrariesCmd()
 	}
 	return m.loginScreen.Init()
 }
 
-func (m Model) fetchMusicLibrariesCmd() tea.Cmd {
+func (m *Model) fetchMusicLibrariesCmd() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		libs, err := client.GetMusicLibraries(context.Background())
@@ -246,7 +246,7 @@ func (m Model) fetchMusicLibrariesCmd() tea.Cmd {
 	}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.palette.Visible() {
 		cmd, handled := m.palette.Update(msg)
 		if handled {
@@ -258,6 +258,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
+	}
+
+	if newM, cmd, handled := m.handlePlayerEvent(msg); handled {
+		return newM, cmd
 	}
 
 	switch msg := msg.(type) {
@@ -445,7 +449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.Server.Username = msg.Username
 			m.cfg.Server.Token = msg.Token
 			m.cfg.Server.UserID = msg.UserID
-			_ = config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg)
+			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg); err != nil {
+				_ = m.err.SetError(fmt.Errorf("Failed to save config: %w", err))
+			}
 		}
 		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID)
 		m.playlistsScreen.SetClient(m.client)
@@ -521,65 +527,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.metadataEditScreen = metadataedit.New(m.styles, m.client, msg.ItemID, msg.ItemType, msg.Track, msg.Album)
 		m.metadataEditScreen.SetSize(m.width, m.screenHeight())
 		return m.navigate(ScreenMetadataEdit)
-
-	case SleepTimerExpiredMsg:
-		if m.IsPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
-			logger.Info("sleep timer expired, stopping playback")
-			m.sleepDeadline = time.Time{}
-			m.sleepDuration = 0
-			m.playerState.SleepRemaining = ""
-			return m.stopPlayback()
-		}
-		return m, nil
-
-	case player.PositionMsg:
-		newM, cmd := m.handlePositionMsg(msg)
-		return newM, cmd
-
-	case player.PlayerReadyMsg:
-		var cmds []tea.Cmd
-		if m.mpv != nil {
-			cmds = append(cmds, player.TickCmd(m.mpv, m.playGeneration))
-			cmds = append(cmds, m.mpv.WatchEvents(m.playGeneration))
-			cmds = append(cmds, player.SetVolumeCmd(m.mpv, m.playerState.Volume))
-			cmds = append(cmds, player.SetSpeedCmd(m.mpv, m.playerState.Speed))
-		}
-		return m, tea.Batch(cmds...)
-
-	case player.PlayerEndMsg:
-		if msg.Generation != m.playGeneration {
-			return m, nil
-		}
-		if msg.Reason == "eof" {
-			if m.repeatTrackID != "" {
-				for idx, t := range m.tracks {
-					if t.ID == m.repeatTrackID {
-						return m.startPlaybackAt(idx)
-					}
-				}
-			}
-			nextIdx := m.currentIndex + 1
-			if nextIdx < len(m.tracks) {
-				return m.startPlaybackAt(nextIdx)
-			}
-			if m.repeatQueue && len(m.tracks) > 0 {
-				return m.startPlaybackAt(0)
-			}
-			return m.stopPlayback()
-		}
-		logger.Error("player ended with non-eof reason", "reason", msg.Reason, "err", msg.Err)
-		newM, cmd := m.stopPlayback()
-		if msg.Err != nil {
-			errCmd := newM.err.SetError(msg.Err)
-			return newM, tea.Batch(cmd, errCmd)
-		}
-		return newM, cmd
-
-	case player.PlayerLaunchErrMsg:
-		logger.Error("player failed to launch", "err", msg.Err)
-		newM, cmd := m.stopPlayback()
-		errCmd := newM.err.SetError(msg.Err)
-		return newM, tea.Batch(cmd, errCmd)
 
 	case components.ErrorDismissMsg:
 		m.err.Dismiss()
@@ -715,9 +662,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mpris.SeekMsg:
-		if m.mpv != nil {
-			return m, player.SeekCmd(m.mpv, msg.Offset)
+		return m.handleSeek(msg.Offset)
+
+	case mpris.SeekRelativeMsg:
+		return m.handleSeek(msg.OffsetSeconds)
+
+	case mpris.SeekAbsoluteMsg:
+		if msg.TrackID != "" && msg.TrackID != m.CurrentItemID() {
+			return m, nil
 		}
+		return m.handleSeekAbsolute(msg.PositionSeconds)
 
 	case mpris.SetVolumeMsg:
 		m.playerState.Volume = msg.Volume
@@ -755,59 +709,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ModelAccessor implementation for mpris.Bridge.Bind
 
-func (m Model) IsPlaying() bool {
+func (m *Model) IsPlaying() bool {
 	return len(m.tracks) > 0 && m.currentIndex >= 0 && m.currentIndex < len(m.tracks)
 }
 
-func (m Model) IsPaused() bool {
+func (m *Model) IsPaused() bool {
 	return !m.playerState.Playing
 }
 
-func (m Model) HasActiveItem() bool {
+func (m *Model) HasActiveItem() bool {
 	return m.IsPlaying()
 }
 
-func (m Model) CurrentTitle() string {
-	if m.IsPlaying() {
+func (m *Model) CurrentTitle() string {
+	if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		return m.tracks[m.currentIndex].Name
 	}
 	return ""
 }
 
-func (m Model) CurrentAuthors() []string {
-	if m.IsPlaying() {
+func (m *Model) CurrentAuthors() []string {
+	if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		return m.tracks[m.currentIndex].Artists
 	}
 	return nil
 }
 
-func (m Model) CurrentItemID() string {
-	if m.IsPlaying() {
+func (m *Model) CurrentItemID() string {
+	if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		return m.tracks[m.currentIndex].ID
 	}
 	return ""
 }
 
-func (m Model) PlayerPosition() float64 {
+func (m *Model) PlayerPosition() float64 {
 	return m.playerState.Position
 }
 
-func (m Model) PlayerDuration() float64 {
-	if m.IsPlaying() && m.playerState.Duration <= 0 {
+func (m *Model) PlayerDuration() float64 {
+	if m.IsPlaying() && m.playerState.Duration <= 0 && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		return m.tracks[m.currentIndex].Duration()
 	}
 	return m.playerState.Duration
 }
 
-func (m Model) PlayerSpeed() float64 {
+func (m *Model) PlayerSpeed() float64 {
 	return m.playerState.Speed
 }
 
-func (m Model) PlayerVolume() int {
+func (m *Model) PlayerVolume() int {
 	return m.playerState.Volume
 }
 
-func (m Model) QueueLength() int {
+func (m *Model) QueueLength() int {
 	return len(m.tracks)
 }
 
@@ -865,7 +819,7 @@ func (a mprisStateAccessor) QueueLength() int {
 	return 0
 }
 
-func (m Model) nextIndex(defaultNext int) int {
+func (m *Model) nextIndex(defaultNext int) int {
 	if m.repeatTrackID != "" {
 		for idx, t := range m.tracks {
 			if t.ID == m.repeatTrackID {
@@ -879,408 +833,6 @@ func (m Model) nextIndex(defaultNext int) int {
 	return defaultNext
 }
 
-func (m *Model) openCommandPalette() {
-	staticItems := []components.PaletteItem{
-		{Label: "Navigation", IsHeader: true},
-		{Label: "Go to Library", Action: components.ActionGoLibrary},
-		{Label: "Go to Playlists", Action: components.ActionGoPlaylists},
-		{Label: "Go to Queue", Action: components.ActionShowQueue},
-	}
-	staticItems = append(staticItems, m.contextPaletteItems()...)
-	if m.IsPlaying() {
-		staticItems = append(staticItems,
-			components.PaletteItem{Label: "Player", IsHeader: true},
-			components.PaletteItem{Label: "Play / Pause", Action: components.ActionTogglePlay},
-			components.PaletteItem{Label: "Seek Forward", Action: components.ActionSeekForward},
-			components.PaletteItem{Label: "Seek Backward", Action: components.ActionSeekBackward},
-			components.PaletteItem{Label: "Speed Up", Action: components.ActionSpeedUp},
-			components.PaletteItem{Label: "Speed Down", Action: components.ActionSpeedDown},
-			components.PaletteItem{Label: "Volume Up", Action: components.ActionVolumeUp},
-			components.PaletteItem{Label: "Volume Down", Action: components.ActionVolumeDown},
-			components.PaletteItem{Label: "Next Track", Action: components.ActionNextChapter},
-			components.PaletteItem{Label: "Previous Track", Action: components.ActionPrevChapter},
-			components.PaletteItem{Label: "Sleep Timer", IsHeader: true},
-			components.PaletteItem{Label: "Sleep Timer: 15m", Action: components.ActionSleep15},
-			components.PaletteItem{Label: "Sleep Timer: 30m", Action: components.ActionSleep30},
-			components.PaletteItem{Label: "Sleep Timer: 45m", Action: components.ActionSleep45},
-			components.PaletteItem{Label: "Sleep Timer: 60m", Action: components.ActionSleep60},
-			components.PaletteItem{Label: "Sleep Timer: Off", Action: components.ActionSleepOff},
-		)
-	}
-	if len(m.tracks) > 0 {
-		staticItems = append(staticItems,
-			components.PaletteItem{Label: "Queue", IsHeader: true},
-			components.PaletteItem{Label: "Shuffle Queue", Action: components.ActionShuffleQueue},
-			components.PaletteItem{Label: "Repeat Current Track", Action: components.ActionRepeatTrack},
-			components.PaletteItem{Label: "Repeat Queue", Action: components.ActionRepeatQueue},
-			components.PaletteItem{Label: "Clear Queue", Action: components.ActionClearQueue},
-		)
-	}
-	m.palette.Open(staticItems, m.contentSearchFunc())
-}
 
-func (m Model) contextPaletteItems() []components.PaletteItem {
-	switch m.screen {
-	case ScreenLibrary:
-		if m.libraryScreen.CurrentLevel() == library.LevelAlbums {
-			if album, ok := m.libraryScreen.SelectedAlbum(); ok {
-				return []components.PaletteItem{
-					{Label: "Context Actions", IsHeader: true},
-					{Label: "Open Selected", Action: components.ActionOpenSelected, ItemID: album.ID, Data: album},
-					{Label: "Add Album to Queue", Action: components.ActionQueueItem, ItemID: album.ID, Data: album},
-					{Label: "Shuffle Album to Queue", Action: components.ActionShuffleItem, ItemID: album.ID, Data: album},
-					{Label: "Edit Metadata", Action: components.ActionEditMetadata, ItemID: album.ID, Data: album},
-				}
-			}
-		}
-		if track, ok := m.libraryScreen.SelectedTrack(); ok {
-			return []components.PaletteItem{
-				{Label: "Context Actions", IsHeader: true},
-				{Label: "Play Selected", Action: components.ActionPlayDirect, ItemID: track.ID, Data: track},
-				{Label: "Add Track to Queue", Action: components.ActionQueueItem, ItemID: track.ID, Data: track},
-				{Label: "Edit Metadata", Action: components.ActionEditMetadata, ItemID: track.ID, Data: track},
-			}
-		}
-	case ScreenPlaylists:
-		if m.playlistsScreen.CurrentLevel() == playlists.LevelPlaylists {
-			if playlist, ok := m.playlistsScreen.SelectedPlaylist(); ok {
-				return []components.PaletteItem{
-					{Label: "Context Actions", IsHeader: true},
-					{Label: "Open Selected", Action: components.ActionOpenSelected, ItemID: playlist.ID, Data: playlist},
-					{Label: "Add Playlist to Queue", Action: components.ActionQueueItem, ItemID: playlist.ID, Data: playlist},
-					{Label: "Shuffle Playlist to Queue", Action: components.ActionShuffleItem, ItemID: playlist.ID, Data: playlist},
-				}
-			}
-		}
-		if track, ok := m.playlistsScreen.SelectedTrack(); ok {
-			return []components.PaletteItem{
-				{Label: "Context Actions", IsHeader: true},
-				{Label: "Play Selected", Action: components.ActionPlayDirect, ItemID: track.ID, Data: track},
-				{Label: "Add Track to Queue", Action: components.ActionQueueItem, ItemID: track.ID, Data: track},
-			}
-		}
-	}
-	return nil
-}
 
-func (m *Model) contentSearchFunc() components.SearchFunc {
-	return func(query string) []components.PaletteItem {
-		if query == "" {
-			return nil
-		}
-		query = strings.ToLower(query)
-		var results []components.PaletteItem
 
-		for _, a := range m.libraryScreen.Albums() {
-			if strings.Contains(strings.ToLower(a.Name), query) {
-				artist := "Unknown Artist"
-				if len(a.Artists) > 0 {
-					artist = strings.Join(a.Artists, ", ")
-				}
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Album: %s — %s", a.Name, artist),
-					Action: components.ActionOpenSelected,
-					ItemID: a.ID,
-					Data:   a,
-				})
-			}
-		}
-
-		for _, p := range m.playlistsScreen.Playlists() {
-			if strings.Contains(strings.ToLower(p.Name), query) {
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Playlist: %s", p.Name),
-					Action: components.ActionOpenSelected,
-					ItemID: p.ID,
-					Data:   p,
-				})
-			}
-		}
-
-		tracksToSearch := m.libraryScreen.AllTracks()
-		if len(tracksToSearch) == 0 {
-			tracksToSearch = m.libraryScreen.Tracks()
-		}
-		for _, t := range tracksToSearch {
-			if strings.Contains(strings.ToLower(t.Name), query) || strings.Contains(strings.ToLower(t.DisplayArtist()), query) {
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Track: %s — %s", t.Name, t.DisplayArtist()),
-					Action: components.ActionPlayDirect,
-					ItemID: t.ID,
-					Data:   t,
-				})
-			}
-		}
-
-		for _, t := range m.tracks {
-			if strings.Contains(strings.ToLower(t.Name), query) || strings.Contains(strings.ToLower(t.DisplayArtist()), query) {
-				results = append(results, components.PaletteItem{
-					Label:  fmt.Sprintf("Queue: %s — %s", t.Name, t.DisplayArtist()),
-					Action: components.ActionPlayDirect,
-					ItemID: t.ID,
-					Data:   t,
-				})
-			}
-		}
-
-		return results
-	}
-}
-
-func (m Model) handlePaletteAction(action components.PaletteAction, itemID string, data any) (tea.Model, tea.Cmd) {
-	switch action {
-	case components.ActionGoLibrary:
-		m.screen = ScreenLibrary
-		return m, nil
-	case components.ActionGoPlaylists:
-		return m.navigate(ScreenPlaylists)
-	case components.ActionShowQueue:
-		m.screen = ScreenQueue
-		return m, nil
-	case components.ActionTogglePlay:
-		if !m.IsPlaying() {
-			return m, nil
-		}
-		m.playerState.Playing = !m.playerState.Playing
-		m.syncQueueScreen()
-		if m.mpv != nil {
-			return m, player.TogglePauseCmd(m.mpv, m.playerState.Playing)
-		}
-		return m, nil
-	case components.ActionSeekForward:
-		seek := 10.0
-		if m.cfg != nil && m.cfg.Player.SeekSeconds != 0 {
-			seek = float64(m.cfg.Player.SeekSeconds)
-		}
-		if seek == 0 {
-			seek = 10
-		}
-		return m.handleSeek(seek)
-	case components.ActionSeekBackward:
-		seek := 10.0
-		if m.cfg != nil && m.cfg.Player.SeekSeconds != 0 {
-			seek = float64(m.cfg.Player.SeekSeconds)
-		}
-		if seek == 0 {
-			seek = 10
-		}
-		return m.handleSeek(-seek)
-	case components.ActionSpeedUp:
-		m.playerState.Speed = math.Round((m.playerState.Speed+0.1)*10) / 10
-		m.syncQueueScreen()
-		if m.mpv != nil {
-			return m, player.SetSpeedCmd(m.mpv, m.playerState.Speed)
-		}
-		return m, nil
-	case components.ActionSpeedDown:
-		newSpeed := math.Round((m.playerState.Speed-0.1)*10) / 10
-		if newSpeed >= 0.1 {
-			m.playerState.Speed = newSpeed
-		}
-		m.syncQueueScreen()
-		if m.mpv != nil {
-			return m, player.SetSpeedCmd(m.mpv, m.playerState.Speed)
-		}
-		return m, nil
-	case components.ActionVolumeUp:
-		if m.playerState.Volume < 150 {
-			m.playerState.Volume += 5
-		}
-		m.syncQueueScreen()
-		if m.mpv != nil {
-			return m, player.SetVolumeCmd(m.mpv, m.playerState.Volume)
-		}
-		return m, nil
-	case components.ActionVolumeDown:
-		if m.playerState.Volume > 0 {
-			m.playerState.Volume -= 5
-		}
-		m.syncQueueScreen()
-		if m.mpv != nil {
-			return m, player.SetVolumeCmd(m.mpv, m.playerState.Volume)
-		}
-		return m, nil
-	case components.ActionNextChapter:
-		if len(m.tracks) > 0 && m.currentIndex+1 < len(m.tracks) {
-			return m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
-		}
-		return m, nil
-	case components.ActionPrevChapter:
-		if m.playerState.Position > 3.0 {
-			if m.mpv != nil {
-				return m, player.SeekCmd(m.mpv, 0)
-			}
-			return m, nil
-		}
-		if len(m.tracks) > 0 && m.currentIndex-1 >= 0 {
-			return m.startPlaybackAt(m.currentIndex - 1)
-		}
-		return m, nil
-	case components.ActionClearQueue:
-		newM, _ := m.Update(queue.QueueActionMsg{Action: "clear"})
-		return newM, nil
-	case components.ActionShuffleQueue:
-		newM, _ := m.Update(queue.QueueActionMsg{Action: "shuffle"})
-		return newM, nil
-	case components.ActionRepeatTrack:
-		if m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
-			newM, _ := m.Update(queue.QueueActionMsg{
-				Action:  "repeat_track",
-				Index:   m.currentIndex,
-				TrackID: m.tracks[m.currentIndex].ID,
-			})
-			return newM, nil
-		}
-		return m, nil
-	case components.ActionRepeatQueue:
-		newM, _ := m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
-		return newM, nil
-	case components.ActionQueueItem:
-		switch item := data.(type) {
-		case jellyfin.Track:
-			newM, cmd := m.Update(library.AddTrackToQueueMsg{Track: item})
-			return newM, cmd
-		case jellyfin.Album:
-			if m.client == nil {
-				return m, nil
-			}
-			client := m.client
-			return m, func() tea.Msg {
-				tracks, err := client.GetTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
-				}
-				return library.AddTracksToQueueMsg{Tracks: tracks}
-			}
-		case jellyfin.Playlist:
-			if m.client == nil {
-				return m, nil
-			}
-			client := m.client
-			return m, func() tea.Msg {
-				tracks, err := client.GetPlaylistTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
-				}
-				return library.AddTracksToQueueMsg{Tracks: tracks}
-			}
-		}
-		return m, nil
-	case components.ActionShuffleItem:
-		switch item := data.(type) {
-		case jellyfin.Track:
-			newM, cmd := m.Update(library.AddTrackToQueueMsg{Track: item})
-			return newM, cmd
-		case jellyfin.Album:
-			if m.client == nil {
-				return m, nil
-			}
-			client := m.client
-			return m, func() tea.Msg {
-				tracks, err := client.GetTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
-				}
-				return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
-			}
-		case jellyfin.Playlist:
-			if m.client == nil {
-				return m, nil
-			}
-			client := m.client
-			return m, func() tea.Msg {
-				tracks, err := client.GetPlaylistTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
-				}
-				return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
-			}
-		}
-		return m, nil
-	case components.ActionEditMetadata:
-		switch item := data.(type) {
-		case jellyfin.Track:
-			m.metadataEditScreen = metadataedit.New(m.styles, m.client, item.ID, "Track", &item, nil)
-			m.metadataEditScreen.SetSize(m.width, m.screenHeight())
-			return m.navigate(ScreenMetadataEdit)
-		case jellyfin.Album:
-			m.metadataEditScreen = metadataedit.New(m.styles, m.client, item.ID, "Album", nil, &item)
-			m.metadataEditScreen.SetSize(m.width, m.screenHeight())
-			return m.navigate(ScreenMetadataEdit)
-		}
-		return m, nil
-	case components.ActionOpenSelected:
-		if album, ok := data.(jellyfin.Album); ok {
-			m.screen = ScreenLibrary
-			cmd := m.libraryScreen.SelectAlbum(album)
-			return m, cmd
-		}
-		if playlist, ok := data.(jellyfin.Playlist); ok {
-			m.screen = ScreenPlaylists
-			cmd := m.playlistsScreen.SelectPlaylist(playlist)
-			return m, cmd
-		}
-	case components.ActionPlayDirect:
-		if track, ok := data.(jellyfin.Track); ok {
-			m.tracks = append(m.tracks, track)
-			return m.startPlaybackAt(len(m.tracks) - 1)
-		}
-	case components.ActionSleep15:
-		return m.setSleepTimer(15 * time.Minute)
-	case components.ActionSleep30:
-		return m.setSleepTimer(30 * time.Minute)
-	case components.ActionSleep45:
-		return m.setSleepTimer(45 * time.Minute)
-	case components.ActionSleep60:
-		return m.setSleepTimer(60 * time.Minute)
-	case components.ActionSleepOff:
-		return m.setSleepTimer(0)
-	}
-	return m, nil
-}
-
-var sleepDurations = []time.Duration{
-	0,
-	15 * time.Minute,
-	30 * time.Minute,
-	45 * time.Minute,
-	60 * time.Minute,
-}
-
-func (m Model) cycleSleepTimer() (Model, tea.Cmd) {
-	nextIdx := 0
-	for i, d := range sleepDurations {
-		if d == m.sleepDuration {
-			nextIdx = (i + 1) % len(sleepDurations)
-			break
-		}
-	}
-	return m.setSleepTimer(sleepDurations[nextIdx])
-}
-
-func (m Model) setSleepTimer(d time.Duration) (Model, tea.Cmd) {
-	m.sleepDuration = d
-	if d == 0 {
-		m.sleepDeadline = time.Time{}
-		m.playerState.SleepRemaining = ""
-		logger.Info("sleep timer disabled")
-		return m, nil
-	}
-	m.sleepGeneration++
-	m.sleepDeadline = time.Now().Add(d)
-	m.playerState.SleepRemaining = formatSleepRemaining(d)
-	logger.Info("sleep timer set", "duration", d)
-	return m, sleepTimerCmd(d, m.sleepGeneration)
-}
-
-func sleepTimerCmd(d time.Duration, generation uint64) tea.Cmd {
-	return tea.Tick(d, func(_ time.Time) tea.Msg {
-		return SleepTimerExpiredMsg{Generation: generation}
-	})
-}
-
-func formatSleepRemaining(d time.Duration) string {
-	mins := int(d.Minutes())
-	secs := int(d.Seconds()) % 60
-	return fmt.Sprintf("%d:%02d", mins, secs)
-}

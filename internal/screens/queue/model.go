@@ -93,14 +93,32 @@ func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
 	cmd := m.list.SetItems(items)
 	_ = cmd // SetItems returns cmd for spinner/etc if needed
 	if !m.HasActiveFilter() && shouldSelectCurrent(oldTracks, tracks, oldCurrentIndex, currentIndex) {
-		m.list.Select(currentIndex)
+		if currentIndex >= 0 && currentIndex < len(items) {
+			m.list.Select(currentIndex)
+		}
 	}
 	m.updateListSize()
+}
+
+func (m *Model) SetCursor(idx int) {
+	if len(m.tracks) == 0 {
+		m.list.Select(0)
+		return
+	}
+	if idx < 0 {
+		idx = 0
+	} else if idx >= len(m.tracks) {
+		idx = len(m.tracks) - 1
+	}
+	m.list.Select(idx)
 }
 
 func shouldSelectCurrent(oldTracks, newTracks []jellyfin.Track, oldCurrentIndex, newCurrentIndex int) bool {
 	if newCurrentIndex < 0 || newCurrentIndex >= len(newTracks) {
 		return false
+	}
+	if oldCurrentIndex < 0 || oldCurrentIndex >= len(oldTracks) {
+		return true
 	}
 	if oldCurrentIndex != newCurrentIndex || len(oldTracks) != len(newTracks) {
 		return true

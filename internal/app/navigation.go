@@ -5,7 +5,7 @@ import (
 )
 
 // navigate pushes the current screen onto the back stack and switches.
-func (m Model) navigate(target Screen) (Model, tea.Cmd) {
+func (m *Model) navigate(target Screen) (*Model, tea.Cmd) {
 	m.backStack = append(m.backStack, m.screen)
 	m.screen = target
 	m.propagateSize()
@@ -13,7 +13,7 @@ func (m Model) navigate(target Screen) (Model, tea.Cmd) {
 }
 
 // back pops the back stack. No-op if empty.
-func (m Model) back() (Model, tea.Cmd) {
+func (m *Model) back() (*Model, tea.Cmd) {
 	if len(m.backStack) == 0 {
 		return m, nil
 	}
@@ -37,7 +37,7 @@ func (m *Model) propagateSize() {
 }
 
 // initScreen returns the Init command for a given screen.
-func (m Model) initScreen(s Screen) tea.Cmd {
+func (m *Model) initScreen(s Screen) tea.Cmd {
 	switch s {
 	case ScreenLogin:
 		return m.loginScreen.Init()

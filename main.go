@@ -36,7 +36,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	}
 
-	if m, ok := finalModel.(app.Model); ok {
+	if m, ok := finalModel.(*app.Model); ok {
 		m.Cleanup()
 	}
 	logger.Info("spruce session ended")

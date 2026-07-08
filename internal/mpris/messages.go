@@ -8,6 +8,17 @@ type SeekMsg struct {
 	Offset float64
 }
 
+// SeekRelativeMsg is sent when MPRIS requests a relative seek by offset (in seconds).
+type SeekRelativeMsg struct {
+	OffsetSeconds float64
+}
+
+// SeekAbsoluteMsg is sent when MPRIS requests setting position to an absolute timestamp (in seconds).
+type SeekAbsoluteMsg struct {
+	TrackID         string
+	PositionSeconds float64
+}
+
 // SetVolumeMsg is sent when MPRIS sets the volume (0-150 scale).
 type SetVolumeMsg struct {
 	Volume int

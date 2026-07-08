@@ -3,6 +3,7 @@ package playlists
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/logger"
@@ -136,7 +137,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.playlists = append([]jellyfin.Playlist(nil), msg.Playlists...)
 			slices.SortFunc(m.playlists, func(a, b jellyfin.Playlist) int {
-				return playlistCollator.CompareString(a.Name, b.Name)
+				c := playlistCollator.CompareString(a.Name, b.Name)
+				if c != 0 {
+					return c
+				}
+				return strings.Compare(a.ID, b.ID)
 			})
 			items := make([]list.Item, len(m.playlists))
 			for i, p := range m.playlists {

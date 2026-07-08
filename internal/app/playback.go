@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m Model) startPlaybackAt(index int) (Model, tea.Cmd) {
+func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 	if index < 0 || index >= len(m.tracks) {
 		return m.stopPlayback()
 	}
@@ -53,7 +54,7 @@ func (m Model) startPlaybackAt(index int) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) stopPlayback() (Model, tea.Cmd) {
+func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	logger.Info("stopping playback")
 	m.playGeneration++
 	m.playerState.Title = ""
@@ -85,7 +86,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
+func (m *Model) handlePositionMsg(msg player.PositionMsg) (*Model, tea.Cmd) {
 	if msg.Generation != m.playGeneration {
 		return m, nil
 	}
@@ -126,7 +127,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		cmds = append(cmds, player.TickCmd(m.mpv, m.playGeneration))
 	}
 
-	if m.client != nil && time.Since(m.lastHeartbeat) >= 15*time.Second {
+	if m.client != nil && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) && time.Since(m.lastHeartbeat) >= 15*time.Second {
 		m.lastHeartbeat = time.Now()
 		client := m.client
 		itemID := m.tracks[m.currentIndex].ID
@@ -170,10 +171,11 @@ func (m *Model) syncQueueScreen() {
 		m.playerState.Duration,
 	)
 	if m.mprisState != nil {
+		m.mprisState.mu.Lock()
 		oldState := *m.mprisState
 		m.mprisState.IsPlaying = m.IsPlaying()
 		m.mprisState.IsPaused = m.IsPaused()
-		if m.IsPlaying() {
+		if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 			m.mprisState.Title = m.tracks[m.currentIndex].Name
 			m.mprisState.Authors = m.tracks[m.currentIndex].Artists
 			m.mprisState.ItemID = m.tracks[m.currentIndex].ID
@@ -192,18 +194,20 @@ func (m *Model) syncQueueScreen() {
 		m.mprisState.Speed = m.playerState.Speed
 		m.mprisState.Volume = m.playerState.Volume
 		m.mprisState.QueueLen = len(m.tracks)
+		newState := *m.mprisState
+		m.mprisState.mu.Unlock()
 
 		if m.mprisBridge != nil {
 			handler := m.mprisBridge.EventHandler()
 			if handler != nil && handler.Player != nil {
-				playbackChanged := oldState.IsPlaying != m.mprisState.IsPlaying ||
-					oldState.IsPaused != m.mprisState.IsPaused ||
-					oldState.Speed != m.mprisState.Speed
-				metadataChanged := oldState.Title != m.mprisState.Title ||
-					oldState.ItemID != m.mprisState.ItemID ||
-					!authorsEqual(oldState.Authors, m.mprisState.Authors)
-				volumeChanged := oldState.Volume != m.mprisState.Volume
-				positionChanged := oldState.Position != m.mprisState.Position
+				playbackChanged := oldState.IsPlaying != newState.IsPlaying ||
+					oldState.IsPaused != newState.IsPaused ||
+					oldState.Speed != newState.Speed
+				metadataChanged := oldState.Title != newState.Title ||
+					oldState.ItemID != newState.ItemID ||
+					!authorsEqual(oldState.Authors, newState.Authors)
+				volumeChanged := oldState.Volume != newState.Volume
+				positionChanged := oldState.Position != newState.Position
 
 				if playbackChanged {
 					_ = handler.Player.OnPlayback()
@@ -218,7 +222,7 @@ func (m *Model) syncQueueScreen() {
 					now := time.Now()
 					if now.Sub(m.lastMprisEmit) >= time.Second {
 						m.lastMprisEmit = now
-						pos := types.Microseconds(m.mprisState.Position * 1_000_000)
+						pos := types.Microseconds(newState.Position * 1_000_000)
 						_ = handler.Player.OnSeek(pos)
 					}
 				}
@@ -228,7 +232,7 @@ func (m *Model) syncQueueScreen() {
 	m.propagateSize()
 }
 
-func (m Model) handleSeek(offset float64) (Model, tea.Cmd) {
+func (m *Model) handleSeek(offset float64) (*Model, tea.Cmd) {
 	if m.mpv == nil || !m.IsPlaying() {
 		return m, nil
 	}
@@ -242,6 +246,21 @@ func (m Model) handleSeek(offset float64) (Model, tea.Cmd) {
 	m.playerState.Position = target
 	m.syncQueueScreen()
 	return m, player.SeekCmd(m.mpv, target)
+}
+
+func (m *Model) handleSeekAbsolute(pos float64) (*Model, tea.Cmd) {
+	if m.mpv == nil || !m.IsPlaying() {
+		return m, nil
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if m.playerState.Duration > 0 && pos > m.playerState.Duration {
+		pos = m.playerState.Duration
+	}
+	m.playerState.Position = pos
+	m.syncQueueScreen()
+	return m, player.SeekCmd(m.mpv, pos)
 }
 
 func (m *Model) mprisPlaybackCmd() tea.Cmd {
@@ -332,4 +351,119 @@ func (m *Model) mprisVolumeCmd() tea.Cmd {
 		_ = handler.Player.OnVolume()
 		return nil
 	}
+}
+
+func (m *Model) handlePlayerEvent(msg tea.Msg) (*Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case SleepTimerExpiredMsg:
+		if m.IsPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
+			logger.Info("sleep timer expired, stopping playback")
+			m.sleepDeadline = time.Time{}
+			m.sleepDuration = 0
+			m.playerState.SleepRemaining = ""
+			newM, cmd := m.stopPlayback()
+			return newM, cmd, true
+		}
+		return m, nil, true
+
+	case player.PositionMsg:
+		newM, cmd := m.handlePositionMsg(msg)
+		return newM, cmd, true
+
+	case player.PlayerReadyMsg:
+		var cmds []tea.Cmd
+		if m.mpv != nil {
+			cmds = append(cmds, player.TickCmd(m.mpv, m.playGeneration))
+			cmds = append(cmds, m.mpv.WatchEvents(m.playGeneration))
+			cmds = append(cmds, player.SetVolumeCmd(m.mpv, m.playerState.Volume))
+			cmds = append(cmds, player.SetSpeedCmd(m.mpv, m.playerState.Speed))
+		}
+		return m, tea.Batch(cmds...), true
+
+	case player.PlayerEndMsg:
+		if msg.Generation != m.playGeneration {
+			return m, nil, true
+		}
+		if msg.Reason == "eof" {
+			if m.repeatTrackID != "" {
+				for idx, t := range m.tracks {
+					if t.ID == m.repeatTrackID {
+						newM, cmd := m.startPlaybackAt(idx)
+						return newM, cmd, true
+					}
+				}
+			}
+			nextIdx := m.currentIndex + 1
+			if nextIdx < len(m.tracks) {
+				newM, cmd := m.startPlaybackAt(nextIdx)
+				return newM, cmd, true
+			}
+			if m.repeatQueue && len(m.tracks) > 0 {
+				newM, cmd := m.startPlaybackAt(0)
+				return newM, cmd, true
+			}
+			newM, cmd := m.stopPlayback()
+			return newM, cmd, true
+		}
+		logger.Error("player ended with non-eof reason", "reason", msg.Reason, "err", msg.Err)
+		newM, cmd := m.stopPlayback()
+		if msg.Err != nil {
+			errCmd := newM.err.SetError(msg.Err)
+			return newM, tea.Batch(cmd, errCmd), true
+		}
+		return newM, cmd, true
+
+	case player.PlayerLaunchErrMsg:
+		logger.Error("player failed to launch", "err", msg.Err)
+		newM, cmd := m.stopPlayback()
+		errCmd := newM.err.SetError(msg.Err)
+		return newM, tea.Batch(cmd, errCmd), true
+	}
+	return m, nil, false
+}
+
+var sleepDurations = []time.Duration{
+	0,
+	15 * time.Minute,
+	30 * time.Minute,
+	45 * time.Minute,
+	60 * time.Minute,
+}
+
+func (m *Model) cycleSleepTimer() (*Model, tea.Cmd) {
+	nextIdx := 0
+	for i, d := range sleepDurations {
+		if d == m.sleepDuration {
+			nextIdx = (i + 1) % len(sleepDurations)
+			break
+		}
+	}
+	return m.setSleepTimer(sleepDurations[nextIdx])
+}
+
+func (m *Model) setSleepTimer(d time.Duration) (*Model, tea.Cmd) {
+	m.sleepDuration = d
+	if d == 0 {
+		m.sleepDeadline = time.Time{}
+		m.playerState.SleepRemaining = ""
+		logger.Info("sleep timer disabled")
+		return m, nil
+	}
+	m.sleepGeneration++
+	m.sleepDeadline = time.Now().Add(d)
+	m.playerState.SleepRemaining = formatSleepRemaining(d)
+	logger.Info("sleep timer set", "duration", d)
+	return m, sleepTimerCmd(d, m.sleepGeneration)
+}
+
+func sleepTimerCmd(d time.Duration, generation uint64) tea.Cmd {
+	return tea.Tick(d, func(_ time.Time) tea.Msg {
+		return SleepTimerExpiredMsg{Generation: generation}
+	})
+}
+
+func formatSleepRemaining(d time.Duration) string {
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	return fmt.Sprintf("%d:%02d", mins, secs)
 }

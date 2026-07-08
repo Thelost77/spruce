@@ -22,7 +22,7 @@ const (
 // View composes the header, error banner, active screen, hints, and player
 // footer into a single string, then places it on the terminal canvas and
 // overlays the command palette modal when visible.
-func (m Model) View() string {
+func (m *Model) View() string {
 	if m.help.Visible() {
 		return m.help.View()
 	}
@@ -74,14 +74,14 @@ func (s Screen) String() string {
 }
 
 // viewHeader renders the 1-line application header bar: `spruce › <screen>`.
-func (m Model) viewHeader() string {
+func (m *Model) viewHeader() string {
 	title := m.styles.Title.PaddingBottom(0).Render("spruce")
 	breadcrumb := m.styles.Muted.Render(" › " + m.screen.String())
 	return lipgloss.JoinHorizontal(lipgloss.Bottom, title, breadcrumb)
 }
 
 // viewScreen renders the currently active screen.
-func (m Model) viewScreen() string {
+func (m *Model) viewScreen() string {
 	switch m.screen {
 	case ScreenLogin:
 		return m.loginScreen.View()
@@ -99,7 +99,7 @@ func (m Model) viewScreen() string {
 }
 
 // viewHints renders a 1-line context-aware keybinding hint bar.
-func (m Model) viewHints() string {
+func (m *Model) viewHints() string {
 	sep := m.styles.Muted.Render("  ")
 	key := func(k, desc string) string {
 		return m.styles.Accent.Render(k) + " " + m.styles.Muted.Render(desc)
@@ -212,7 +212,7 @@ func (m Model) viewHints() string {
 }
 
 // overlayPaletteModal centers the command palette modal over the content.
-func (m Model) overlayPaletteModal(content string) string {
+func (m *Model) overlayPaletteModal(content string) string {
 	overlay := m.palette.View()
 	if overlay == "" {
 		return content

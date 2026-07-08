@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
@@ -283,7 +284,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.albums = append([]jellyfin.Album(nil), msg.Albums...)
 			slices.SortFunc(m.albums, func(a, b jellyfin.Album) int {
-				return libraryCollator.CompareString(a.Name, b.Name)
+				c := libraryCollator.CompareString(a.Name, b.Name)
+				if c != 0 {
+					return c
+				}
+				if a.ProductionYear != b.ProductionYear {
+					return a.ProductionYear - b.ProductionYear
+				}
+				return strings.Compare(a.ID, b.ID)
 			})
 			items := make([]list.Item, len(m.albums))
 			for i, a := range m.albums {
@@ -302,7 +310,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.tracks = append([]jellyfin.Track(nil), msg.Tracks...)
 			slices.SortFunc(m.tracks, func(a, b jellyfin.Track) int {
-				return libraryCollator.CompareString(a.Name, b.Name)
+				c := libraryCollator.CompareString(a.Name, b.Name)
+				if c != 0 {
+					return c
+				}
+				if a.ParentIndexNumber != b.ParentIndexNumber {
+					return a.ParentIndexNumber - b.ParentIndexNumber
+				}
+				if a.IndexNumber != b.IndexNumber {
+					return a.IndexNumber - b.IndexNumber
+				}
+				return strings.Compare(a.ID, b.ID)
 			})
 			items := make([]list.Item, len(m.tracks))
 			for i, t := range m.tracks {
@@ -319,7 +337,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.allTracks = append([]jellyfin.Track(nil), msg.Tracks...)
 			slices.SortFunc(m.allTracks, func(a, b jellyfin.Track) int {
-				return libraryCollator.CompareString(a.Name, b.Name)
+				c := libraryCollator.CompareString(a.Name, b.Name)
+				if c != 0 {
+					return c
+				}
+				if a.ParentIndexNumber != b.ParentIndexNumber {
+					return a.ParentIndexNumber - b.ParentIndexNumber
+				}
+				if a.IndexNumber != b.IndexNumber {
+					return a.IndexNumber - b.IndexNumber
+				}
+				return strings.Compare(a.ID, b.ID)
 			})
 			m.allTracksErr = nil
 		} else {

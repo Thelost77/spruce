@@ -2,6 +2,8 @@ package login
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/logger"
@@ -82,7 +84,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Update handles messages for the login screen.
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -92,30 +94,31 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			} else {
 				m.focused = (m.focused + 1) % numFields
 			}
-			return m, m.updateFocus()
+			return *m, m.updateFocus()
 
 		case "enter":
 			if m.focused == fieldPassword {
-				return m, m.loginCmd()
+				m.loading = true
+				return *m, m.loginCmd()
 			}
 			m.focused = (m.focused + 1) % numFields
-			return m, m.updateFocus()
+			return *m, m.updateFocus()
 		}
 
 	case LoginSuccessMsg:
 		m.loading = false
 		m.err = nil
-		return m, nil
+		return *m, nil
 
 	case LoginFailedMsg:
 		m.loading = false
 		m.err = msg.Err
-		return m, nil
+		return *m, nil
 	}
 
 	var cmd tea.Cmd
 	m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
-	return m, cmd
+	return *m, cmd
 }
 
 // updateFocus sets focus on the active field and blurs others.
@@ -133,8 +136,20 @@ func (m *Model) updateFocus() tea.Cmd {
 
 // loginCmd returns a tea.Cmd that calls jellyfin.Client.Login().
 func (m *Model) loginCmd() tea.Cmd {
-	serverURL := m.inputs[fieldServer].Value()
-	username := m.inputs[fieldUsername].Value()
+	serverURL := strings.TrimSpace(m.inputs[fieldServer].Value())
+	if serverURL == "" && m.inputs[fieldServer].Placeholder != "" {
+		serverURL = m.inputs[fieldServer].Placeholder
+	}
+	if serverURL != "" && !strings.HasPrefix(serverURL, "http://") && !strings.HasPrefix(serverURL, "https://") {
+		serverURL = "http://" + serverURL
+	}
+	username := strings.TrimSpace(m.inputs[fieldUsername].Value())
+	if username == "" {
+		m.loading = false
+		return func() tea.Msg {
+			return LoginFailedMsg{Err: errors.New("Username cannot be empty")}
+		}
+	}
 	password := m.inputs[fieldPassword].Value()
 	m.loading = true
 

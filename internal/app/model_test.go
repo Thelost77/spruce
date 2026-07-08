@@ -47,7 +47,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Test LoginSuccessMsg -> triggers music libraries fetch
 	loginMsg := login.LoginSuccessMsg{Token: "tok-1", ServerURL: server.URL, Username: "alice", UserID: "usr-1"}
 	newM, cmd := m.Update(loginMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.client == nil {
 		t.Fatal("expected client set after login")
 	}
@@ -58,7 +58,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Wait, tea.Batch returns a batch cmd, let's test musicLibrariesLoadedMsg directly
 	libsMsg := musicLibrariesLoadedMsg{libraries: []jellyfin.Library{{ID: "lib-1", Name: "Music"}}}
 	newM, _ = m.Update(libsMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.screen != ScreenLibrary {
 		t.Errorf("expected ScreenLibrary after libs loaded, got %v", m.screen)
 	}
@@ -70,7 +70,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	}
 	playMsg := library.PlayTracksMsg{Tracks: tracks, StartIndex: 0}
 	newM, _ = m.Update(playMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	if m.screen != ScreenLibrary {
 		t.Errorf("expected ScreenLibrary during playback, got %v", m.screen)
@@ -81,7 +81,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 
 	// Test MPRIS NextMsg
 	newM, _ = m.Update(mpris.NextMsg{})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.currentIndex != 1 || m.CurrentItemID() != "t-2" {
 		t.Errorf("expected advance to track 2, got idx=%d, id=%q", m.currentIndex, m.CurrentItemID())
 	}
@@ -89,7 +89,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Test MPRIS PreviousMsg (position <= 3.0 -> goes back to track 0)
 	m.playerState.Position = 1.0
 	newM, _ = m.Update(mpris.PreviousMsg{})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.currentIndex != 0 || m.CurrentItemID() != "t-1" {
 		t.Errorf("expected prev track 0, got idx=%d, id=%q", m.currentIndex, m.CurrentItemID())
 	}
@@ -97,29 +97,29 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Test PositionMsg.Err -> stops playback, does NOT auto-advance (fatal).
 	posMsg := player.PositionMsg{Generation: m.playGeneration, Err: errors.New("socket dead")}
 	newM, _ = m.Update(posMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.IsPlaying() {
 		t.Errorf("expected playback stopped on PositionMsg.Err, no advance")
 	}
 
 	// Restart and verify mpv's brief EOF-window "property unavailable" does not kill repeat playback.
 	newM, _ = m.startPlaybackAt(0)
-	m = newM.(Model)
+	m = newM.(*Model)
 	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: errors.New("get time-pos: mpv error: property unavailable")}
 	newM, _ = m.Update(posMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.IsPlaying() || m.currentIndex != 0 {
 		t.Errorf("expected transient mpv property error to keep playback alive, playing=%v idx=%d", m.IsPlaying(), m.currentIndex)
 	}
 
 	// Restart at track 0 for PlayerEndMsg tests.
 	newM, _ = m.startPlaybackAt(0)
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	// Test PlayerEndMsg{eof} -> advances queue.
 	endMsg := player.PlayerEndMsg{Generation: m.playGeneration, Reason: "eof"}
 	newM, _ = m.Update(endMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.currentIndex != 1 || m.CurrentItemID() != "t-2" {
 		t.Errorf("expected eof to advance to track 2, got idx=%d", m.currentIndex)
 	}
@@ -127,17 +127,17 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Test PlayerEndMsg{eof} on final track -> stops playback.
 	endMsg = player.PlayerEndMsg{Generation: m.playGeneration, Reason: "eof"}
 	newM, _ = m.Update(endMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.IsPlaying() {
 		t.Errorf("expected playback stopped after final eof")
 	}
 
 	// Test PlayerEndMsg{error} -> stops playback, no advance.
 	newM, _ = m.startPlaybackAt(0)
-	m = newM.(Model)
+	m = newM.(*Model)
 	endMsg = player.PlayerEndMsg{Generation: m.playGeneration, Reason: "error", Err: errors.New("load failed")}
 	newM, _ = m.Update(endMsg)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.IsPlaying() {
 		t.Errorf("expected playback stopped on error reason, no advance")
 	}
@@ -146,7 +146,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	m.tracks = tracks
 	m.currentIndex = 0
 	newM, _ = m.Update(queue.QueueActionMsg{Action: "clear"})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if len(m.tracks) != 0 || m.IsPlaying() {
 		t.Errorf("expected queue cleared")
 	}
@@ -242,7 +242,7 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 
 	// Test open palette with ctrl+p
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.palette.Visible() {
 		t.Fatal("expected palette to be visible after ctrl+p")
 	}
@@ -255,7 +255,7 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 
 	// Test executing a static palette action directly via handlePaletteAction
 	newM, _ = m.handlePaletteAction(components.ActionShowQueue, "", nil)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.screen != ScreenQueue {
 		t.Errorf("expected screen to switch to queue, got %v", m.screen)
 	}
@@ -266,7 +266,7 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 		t.Error("expected repeatQueue false initially")
 	}
 	newM, _ = m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.repeatQueue {
 		t.Error("expected repeatQueue true after repeat_queue action")
 	}
@@ -281,28 +281,28 @@ func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 
 	// Test global n (next)
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.currentIndex != 1 {
 		t.Errorf("expected currentIndex 1 after n, got %d", m.currentIndex)
 	}
 
 	// Test global p (previous)
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.currentIndex != 0 {
 		t.Errorf("expected currentIndex 0 after p, got %d", m.currentIndex)
 	}
 
 	vol := m.playerState.Volume
 	newM, _ = m.handlePaletteAction(components.ActionVolumeUp, "", nil)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.playerState.Volume <= vol {
 		t.Fatalf("expected palette volume up to increase volume")
 	}
 
 	m.repeatQueue = false
 	newM, _ = m.handlePaletteAction(components.ActionRepeatQueue, "", nil)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.repeatQueue {
 		t.Fatalf("expected palette repeat queue to enable repeatQueue")
 	}
@@ -314,7 +314,7 @@ func TestAppModel_PlaylistsNavigationAndPalette(t *testing.T) {
 	m.screen = ScreenLibrary
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.screen != ScreenPlaylists {
 		t.Fatalf("expected o to open playlists, got %v", m.screen)
 	}
@@ -335,7 +335,7 @@ func TestAppModel_PlaylistsNavigationAndPalette(t *testing.T) {
 	}
 
 	newM, _ = m.handlePaletteAction(components.ActionGoPlaylists, "", nil)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.screen != ScreenPlaylists {
 		t.Fatalf("expected palette Go Playlists to open playlists, got %v", m.screen)
 	}
@@ -385,7 +385,7 @@ func TestAppModel_GlobalRepeatKeysWhenPlayerActive(t *testing.T) {
 	m.currentIndex = 1
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.repeatTrackID != "t-2" || m.repeatQueue {
 		t.Fatalf("expected current track repeat, got track=%q queue=%v", m.repeatTrackID, m.repeatQueue)
 	}
@@ -394,13 +394,13 @@ func TestAppModel_GlobalRepeatKeysWhenPlayerActive(t *testing.T) {
 	}
 
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.repeatTrackID != "" || m.playerState.RepeatStatus != "" {
 		t.Fatalf("expected repeat track cleared, got track=%q status=%q", m.repeatTrackID, m.playerState.RepeatStatus)
 	}
 
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.repeatQueue || m.repeatTrackID != "" {
 		t.Fatalf("expected repeat queue enabled, got track=%q queue=%v", m.repeatTrackID, m.repeatQueue)
 	}
@@ -415,7 +415,7 @@ func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
 		{ID: "t-1", Name: "Track 1", RunTimeTicks: 1800000000},
 	}
 	newM, _ := m.Update(library.PlayTracksMsg{Tracks: tracks, StartIndex: 0})
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	if !m.IsPlaying() {
 		t.Fatal("expected playing initially")
@@ -424,7 +424,7 @@ func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
 	initialVol := m.PlayerVolume()
 	// Press ']' (VolumeUp)
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	if m.PlayerVolume() == initialVol {
 		t.Errorf("expected volume to change after VolumeUp, got %d", m.PlayerVolume())
@@ -436,7 +436,7 @@ func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
 	initialSpeed := m.PlayerSpeed()
 	// Press '+' (SpeedUp)
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'+'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	if m.PlayerSpeed() == initialSpeed {
 		t.Errorf("expected speed to change after SpeedUp, got %f", m.PlayerSpeed())
@@ -479,7 +479,7 @@ func TestAppModel_SleepTimer(t *testing.T) {
 	m.screen = ScreenLibrary
 	tracks := []jellyfin.Track{{ID: "t-1", Name: "Track One"}}
 	newM, _ := m.Update(library.PlayTracksMsg{Tracks: tracks, StartIndex: 0})
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	if !m.IsPlaying() {
 		t.Fatal("expected IsPlaying true")
@@ -487,35 +487,35 @@ func TestAppModel_SleepTimer(t *testing.T) {
 
 	// Press 'S' to cycle to 15m
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.sleepDuration != 15*time.Minute || m.sleepGeneration != 1 {
 		t.Fatalf("expected 15m and gen 1, got %v gen %d", m.sleepDuration, m.sleepGeneration)
 	}
 
 	// Press 'S' to cycle to 30m
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.sleepDuration != 30*time.Minute || m.sleepGeneration != 2 {
 		t.Fatalf("expected 30m and gen 2, got %v gen %d", m.sleepDuration, m.sleepGeneration)
 	}
 
 	// Stale expiry (gen 1) should not stop playback
 	newM, _ = m.Update(SleepTimerExpiredMsg{Generation: 1})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.IsPlaying() {
 		t.Fatal("stale sleep timer should not stop playback")
 	}
 
 	// Active expiry (gen 2) should stop playback
 	newM, _ = m.Update(SleepTimerExpiredMsg{Generation: 2})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.IsPlaying() {
 		t.Fatal("active sleep timer should stop playback")
 	}
 
 	// Test palette action setting
 	newM, _ = m.handlePaletteAction(components.ActionSleep45, "", nil)
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.sleepDuration != 45*time.Minute {
 		t.Fatalf("expected 45m from palette action, got %v", m.sleepDuration)
 	}
@@ -532,7 +532,7 @@ func TestAppModel_HelpOverlay(t *testing.T) {
 
 	// Press '?' to open help overlay
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.help.Visible() {
 		t.Fatal("expected help overlay visible after pressing '?'")
 	}
@@ -545,21 +545,21 @@ func TestAppModel_HelpOverlay(t *testing.T) {
 	// Swallowing keys while help is open
 	prevScreen := m.screen
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.screen != prevScreen || !m.help.Visible() {
 		t.Errorf("expected key to be swallowed while help overlay open")
 	}
 
 	// Press Esc to close help overlay
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if m.help.Visible() {
 		t.Fatal("expected help overlay hidden after Esc")
 	}
 
 	// Press '?' again to open
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	m = newM.(Model)
+	m = newM.(*Model)
 	if !m.help.Visible() {
 		t.Fatal("expected help overlay visible after second '?'")
 	}
@@ -593,7 +593,7 @@ func TestAppModel_LibraryNavigationAndHints(t *testing.T) {
 
 	// Press Esc while at LevelTracks on ScreenLibrary
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = newM.(Model)
+	m = newM.(*Model)
 
 	if m.screen != ScreenLibrary {
 		t.Errorf("expected screen to remain ScreenLibrary, got %v", m.screen)

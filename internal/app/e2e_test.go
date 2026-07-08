@@ -201,14 +201,14 @@ func keySpecial(t tea.KeyType) tea.KeyMsg {
 	return tea.KeyMsg{Type: t}
 }
 
-func update(m Model, msg tea.Msg) (Model, tea.Cmd) {
+func update(m *Model, msg tea.Msg) (*Model, tea.Cmd) {
 	res, cmd := m.Update(msg)
-	return res.(Model), cmd
+	return res.(*Model), cmd
 }
 
 // execCmd runs a cmd, feeds non-nil messages back into Update, and recurses
 // through BatchMsg. tea.QuitMsg and tea.Tick messages are not fed back.
-func execCmd(m Model, cmd tea.Cmd) (Model, tea.Cmd) {
+func execCmd(m *Model, cmd tea.Cmd) (*Model, tea.Cmd) {
 	if cmd == nil {
 		return m, nil
 	}
@@ -231,8 +231,8 @@ func execCmd(m Model, cmd tea.Cmd) (Model, tea.Cmd) {
 
 // driveToPlayback logs in, loads the music library, and starts playback of the
 // given tracks at startIndex, executing any HTTP side-effect cmds.
-func driveToPlayback(mj *mockJellyfin, tracks []jellyfin.Track, startIndex int) func(*testing.T, Model) (Model, tea.Cmd) {
-	return func(t *testing.T, m Model) (Model, tea.Cmd) {
+func driveToPlayback(mj *mockJellyfin, tracks []jellyfin.Track, startIndex int) func(*testing.T, *Model) (*Model, tea.Cmd) {
+	return func(t *testing.T, m *Model) (*Model, tea.Cmd) {
 		m, _ = update(m, login.LoginSuccessMsg{
 			Token: "tok-1", ServerURL: mj.URL, Username: "alice", UserID: "usr-1",
 		})

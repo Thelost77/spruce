@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/logger"
@@ -135,10 +136,21 @@ func QuitCmd(p Player) tea.Cmd {
 	}
 }
 
-// SeekCmd sends a seek request to mpv by offset seconds.
-func SeekCmd(p Player, offset float64) tea.Cmd {
+// SeekCmd sends an absolute seek request to mpv by target seconds.
+func SeekCmd(p Player, target float64) tea.Cmd {
 	return func() tea.Msg {
-		err := p.Seek(offset)
+		err := p.Seek(target)
+		if err != nil {
+			return PositionMsg{Err: err}
+		}
+		return nil
+	}
+}
+
+// SeekRelativeCmd sends a relative seek request to mpv by offset seconds.
+func SeekRelativeCmd(p Player, offset float64) tea.Cmd {
+	return func() tea.Msg {
+		err := p.SeekRelative(offset)
 		if err != nil {
 			return PositionMsg{Err: err}
 		}
@@ -155,27 +167,36 @@ func SeekCmd(p Player, offset float64) tea.Cmd {
 // unregistered and this cmd returns a fatal PlayerEndMsg instead of leaking.
 func (m *Mpv) WatchEvents(generation uint64) tea.Cmd {
 	return func() tea.Msg {
-		if m == nil || m.conn == nil {
+		conn := m.getConn()
+		if conn == nil {
 			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("no mpv connection")}
 		}
-		events, stop := m.conn.NewEventListener()
+		events, stop := conn.NewEventListener()
 		if events == nil {
 			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("event listener unavailable")}
 		}
+		var closeOnce sync.Once
+		closeStop := func() {
+			closeOnce.Do(func() {
+				close(stop)
+			})
+		}
 		go func() {
-			for !m.conn.IsClosed() {
+			for !conn.IsClosed() {
 				time.Sleep(200 * time.Millisecond)
 			}
-			close(stop)
+			closeStop()
 		}()
 		for ev := range events {
 			if ev == nil {
 				continue
 			}
 			if ev.Name == "end-file" {
+				closeStop()
 				return PlayerEndMsg{Generation: generation, Reason: ev.Reason}
 			}
 		}
+		closeStop()
 		return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("mpv connection closed")}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/Thelost77/spruce/internal/config"
 )
@@ -26,7 +27,7 @@ func Init() func() {
 	var cleanup func()
 	once.Do(func() {
 		dir := config.ConfigDir()
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return
 		}
 		path := filepath.Join(dir, "spruce.log")
@@ -36,15 +37,29 @@ func Init() func() {
 			_ = os.Rename(path, path+".old")
 		}
 
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return
+		}
+		_ = os.Chmod(path, 0o600)
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			_ = f.Close()
+			path = filepath.Join(dir, fmt.Sprintf("spruce-%d.log", os.Getpid()))
+			f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				return
+			}
+			_ = os.Chmod(path, 0o600)
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		}
 		logFile = f
 		instance = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 		}))
-		cleanup = func() { _ = f.Close() }
+		cleanup = func() {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			_ = f.Close()
+		}
 	})
 	if cleanup == nil {
 		cleanup = func() {}
