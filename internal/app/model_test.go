@@ -269,6 +269,80 @@ func TestInitWithSavedLoginFallbackOn401(t *testing.T) {
 	}
 }
 
+func TestMusicLibrariesLoadErrorKeepsSessionUnlessUnauthorized(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.Address = "https://jellyfin.example.com"
+	cfg.Server.Token = "tok-valid"
+	cfg.Server.UserID = "usr-1"
+
+	m := New(&cfg, nil)
+	client := m.client
+
+	updated, _ := m.Update(musicLibrariesLoadedMsg{err: errors.New("request timeout")})
+	m = updated.(*Model)
+
+	if m.screen != ScreenLibrary {
+		t.Fatalf("expected session screen to remain ScreenLibrary, got %v", m.screen)
+	}
+	if m.client != client {
+		t.Fatal("expected client to remain after non-auth error")
+	}
+	if m.cfg.Server.Token != "tok-valid" || m.cfg.Server.UserID != "usr-1" {
+		t.Fatalf("expected credentials to remain after non-auth error, got token=%q user=%q", m.cfg.Server.Token, m.cfg.Server.UserID)
+	}
+	if !m.err.HasError() {
+		t.Fatal("expected non-auth error banner")
+	}
+}
+
+func TestLibraryLoadUnauthorizedResetsPlaybackAndQueue(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	authErr := errors.New("unexpected status 401")
+	for name, msg := range map[string]tea.Msg{
+		"albums": library.AlbumsLoadedMsg{Err: authErr},
+		"tracks": library.TracksLoadedMsg{Err: authErr},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Server.Address = "https://jellyfin.example.com"
+			cfg.Server.Token = "tok-expired"
+			cfg.Server.UserID = "usr-1"
+
+			m := New(&cfg, nil)
+			tracks := []jellyfin.Track{
+				{ID: "t-1", Name: "Track 1"},
+				{ID: "t-2", Name: "Track 2"},
+			}
+			updated, _ := m.Update(library.PlayTracksMsg{Tracks: tracks, StartIndex: 0})
+			m = updated.(*Model)
+			m.repeatTrackID = "t-1"
+			m.repeatQueue = true
+			m.playerState.RepeatStatus = "🔁 Queue"
+
+			updated, _ = m.Update(msg)
+			m = updated.(*Model)
+
+			if m.screen != ScreenLogin || m.client != nil {
+				t.Fatalf("expected login screen with nil client, got screen=%v client=%v", m.screen, m.client)
+			}
+			if m.IsPlaying() || len(m.tracks) != 0 || m.currentIndex != -1 {
+				t.Fatalf("expected stopped empty playback state, playing=%v tracks=%d index=%d", m.IsPlaying(), len(m.tracks), m.currentIndex)
+			}
+			if len(m.queueScreen.Tracks()) != 0 || m.mprisState.QueueLength() != 0 {
+				t.Fatalf("expected cleared queue projections, screen=%d mpris=%d", len(m.queueScreen.Tracks()), m.mprisState.QueueLength())
+			}
+			if m.repeatTrackID != "" || m.repeatQueue || m.playerState.RepeatStatus != "" {
+				t.Fatalf("expected cleared repeat state, track=%q queue=%v status=%q", m.repeatTrackID, m.repeatQueue, m.playerState.RepeatStatus)
+			}
+			if m.cfg.Server.Token != "" || m.cfg.Server.UserID != "" {
+				t.Fatalf("expected cleared credentials, token=%q user=%q", m.cfg.Server.Token, m.cfg.Server.UserID)
+			}
+		})
+	}
+}
+
 func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 	m := New(nil, nil)
 	m.SetSize(80, 24)

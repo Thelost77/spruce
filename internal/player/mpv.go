@@ -17,46 +17,92 @@ import (
 )
 
 var (
-	mpvSocketDir     string
-	mpvSocketDirOnce sync.Once
+	mpvSocketDir   string
+	mpvSocketDirMu sync.Mutex
 )
 
-// MpvSocketDir returns the directory where mpv can create IPC sockets.
+// MpvSocketDir returns a private directory where mpv can create IPC sockets.
 // For snap-packaged mpv, this is ~/snap/mpv/common/spruce/ since snap's /tmp is isolated.
 // For native mpv, this is /tmp/spruce-runtime-<uid> with 0700 permissions.
-func MpvSocketDir() string {
-	mpvSocketDirOnce.Do(func() {
-		mpvPath, err := exec.LookPath("mpv")
-		if err == nil {
-			resolved, err := filepath.EvalSymlinks(mpvPath)
-			if err == nil && filepath.Base(resolved) == "snap" {
-				home, err := os.UserHomeDir()
-				if err == nil {
-					snapDir := filepath.Join(home, "snap", "mpv", "common")
-					if info, err := os.Stat(snapDir); err == nil && info.IsDir() {
-						sub := filepath.Join(snapDir, "spruce")
-						if err := os.MkdirAll(sub, 0700); err == nil {
-							mpvSocketDir = sub
-							return
-						}
-						mpvSocketDir = snapDir
-						return
+func MpvSocketDir() (string, error) {
+	mpvSocketDirMu.Lock()
+	defer mpvSocketDirMu.Unlock()
+	if mpvSocketDir != "" {
+		return mpvSocketDir, nil
+	}
+	dir, err := resolveMpvSocketDir()
+	if err != nil {
+		return "", err
+	}
+	mpvSocketDir = dir
+	return dir, nil
+}
+
+func resolveMpvSocketDir() (string, error) {
+	mpvPath, err := exec.LookPath("mpv")
+	if err == nil {
+		resolved, err := filepath.EvalSymlinks(mpvPath)
+		if err == nil && filepath.Base(resolved) == "snap" {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				snapDir := filepath.Join(home, "snap", "mpv", "common")
+				if info, err := os.Stat(snapDir); err == nil && info.IsDir() {
+					sub := filepath.Join(snapDir, "spruce")
+					if err := prepareMpvSocketDir(sub); err == nil {
+						return sub, nil
 					}
 				}
 			}
 		}
-		runtimeDir := filepath.Join(os.TempDir(), fmt.Sprintf("spruce-runtime-%d", os.Getuid()))
-		if err := os.MkdirAll(runtimeDir, 0700); err == nil {
-			mpvSocketDir = runtimeDir
-			return
-		}
-		dir := filepath.Join(os.TempDir(), fmt.Sprintf("spruce-%d", os.Getuid()))
-		_ = os.MkdirAll(dir, 0700)
-		mpvSocketDir = dir
-	})
-	return mpvSocketDir
+	}
+
+	primary := filepath.Join(os.TempDir(), fmt.Sprintf("spruce-runtime-%d", os.Getuid()))
+	fallback := filepath.Join(os.TempDir(), fmt.Sprintf("spruce-%d", os.Getuid()))
+	return selectMpvSocketDir(primary, fallback)
 }
 
+func selectMpvSocketDir(primary, fallback string) (string, error) {
+	if err := prepareMpvSocketDir(primary); err == nil {
+		return primary, nil
+	} else if fallbackErr := prepareMpvSocketDir(fallback); fallbackErr == nil {
+		return fallback, nil
+	} else {
+		return "", fmt.Errorf("prepare mpv socket directories: primary: %w; fallback: %v", err, fallbackErr)
+	}
+}
+
+func prepareMpvSocketDir(path string) error {
+	if _, err := os.Lstat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("lstat socket directory: %w", err)
+		}
+		if err := os.Mkdir(path, 0700); err != nil && !os.IsExist(err) {
+			return fmt.Errorf("create socket directory: %w", err)
+		}
+	}
+
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("open socket directory: %w", err)
+	}
+
+	var stat syscall.Stat_t
+	err = syscall.Fstat(fd, &stat)
+	if err == nil && stat.Uid != uint32(os.Getuid()) {
+		err = fmt.Errorf("socket directory is not owned by current user")
+	}
+	if err == nil && stat.Mode&07777 != 0700 {
+		err = syscall.Fchmod(fd, 0700)
+	}
+	closeErr := syscall.Close(fd)
+	if err != nil {
+		return fmt.Errorf("validate socket directory: %w", err)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close socket directory: %w", closeErr)
+	}
+	return nil
+}
 
 // Player defines the interface for media playback control.
 type Player interface {

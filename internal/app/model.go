@@ -240,7 +240,11 @@ func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
 		m, stopCmd = m.stopPlayback()
 	}
 	m.tracks = nil
+	m.currentIndex = -1
 	m.repeatTrackID = ""
+	m.repeatQueue = false
+	m.playerState.RepeatStatus = ""
+	m.syncQueueScreen()
 	if components.IsUnauthorized(err) && m.cfg != nil && hasSavedLogin(*m.cfg) {
 		m.cfg.Server.Token = ""
 		m.cfg.Server.UserID = ""
@@ -251,7 +255,6 @@ func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
 	m.screen = ScreenLogin
 	return m, tea.Batch(stopCmd, m.err.SetError(err), m.loginScreen.Init())
 }
-
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.palette.Visible() {
@@ -479,7 +482,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			errMsg = errors.New("no music libraries found on server")
 		}
-		return m.handleAuthReset(errMsg)
+		if components.IsUnauthorized(errMsg) {
+			return m.handleAuthReset(errMsg)
+		}
+		return m, m.err.SetError(errMsg)
 
 	case playlists.PlaylistsLoadedMsg:
 		var cmd tea.Cmd
@@ -497,15 +503,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case library.AlbumsLoadedMsg:
+		var cmd tea.Cmd
+		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
+		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+			return m.handleAuthReset(msg.Err)
+		}
+		return m, cmd
+
+	case library.TracksLoadedMsg:
+		var cmd tea.Cmd
+		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
+		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+			return m.handleAuthReset(msg.Err)
+		}
+		return m, cmd
+
 	case library.AllTracksLoadedMsg:
-		m.libraryScreen, _ = m.libraryScreen.Update(msg)
+		var cmd tea.Cmd
+		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
 		if msg.Err != nil {
 			if components.IsUnauthorized(msg.Err) {
 				return m.handleAuthReset(msg.Err)
 			}
 			return m, m.err.SetError(msg.Err)
 		}
-		return m, nil
+		return m, cmd
 
 	case library.PlayTracksMsg:
 		logger.Info("received PlayTracksMsg", "count", len(msg.Tracks), "start", msg.StartIndex)
@@ -794,7 +817,6 @@ func (m *Model) QueueLength() int {
 	return len(m.tracks)
 }
 
-
 func (m *Model) nextIndex(defaultNext int) int {
 	if m.repeatTrackID != "" {
 		for idx, t := range m.tracks {
@@ -808,7 +830,3 @@ func (m *Model) nextIndex(defaultNext int) int {
 	}
 	return defaultNext
 }
-
-
-
-

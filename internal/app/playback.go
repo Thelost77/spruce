@@ -160,6 +160,17 @@ func authorsEqual(a, b []string) bool {
 	return true
 }
 
+type mprisStateSnapshot struct {
+	playing  bool
+	paused   bool
+	title    string
+	authors  []string
+	itemID   string
+	position float64
+	speed    float64
+	volume   int
+}
+
 func (m *Model) syncQueueScreen() {
 	if !m.queueScreen.IsFiltering() && !m.queueScreen.HasActiveFilter() {
 		m.queueScreen.SetQueue(m.tracks, m.currentIndex)
@@ -171,9 +182,18 @@ func (m *Model) syncQueueScreen() {
 		m.playerState.Duration,
 	)
 	if m.mprisState != nil {
-		var oldState, newState MprisState
+		var oldState, newState mprisStateSnapshot
 		m.mprisState.Update(func(s *MprisState) {
-			oldState = *s
+			oldState = mprisStateSnapshot{
+				playing:  s.playing,
+				paused:   s.paused,
+				title:    s.title,
+				authors:  s.authors,
+				itemID:   s.itemID,
+				position: s.position,
+				speed:    s.speed,
+				volume:   s.volume,
+			}
 			s.playing = m.IsPlaying()
 			s.paused = m.IsPaused()
 			s.hasActiveItem = m.IsPlaying()
@@ -196,7 +216,16 @@ func (m *Model) syncQueueScreen() {
 			s.speed = m.playerState.Speed
 			s.volume = m.playerState.Volume
 			s.queueLength = len(m.tracks)
-			newState = *s
+			newState = mprisStateSnapshot{
+				playing:  s.playing,
+				paused:   s.paused,
+				title:    s.title,
+				authors:  s.authors,
+				itemID:   s.itemID,
+				position: s.position,
+				speed:    s.speed,
+				volume:   s.volume,
+			}
 		})
 
 		if m.mprisBridge != nil {
@@ -210,7 +239,6 @@ func (m *Model) syncQueueScreen() {
 					!authorsEqual(oldState.authors, newState.authors)
 				volumeChanged := oldState.volume != newState.volume
 				positionChanged := oldState.position != newState.position
-
 
 				if playbackChanged {
 					_ = handler.Player.OnPlayback()

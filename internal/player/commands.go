@@ -103,8 +103,13 @@ type PlayerQuitMsg struct{}
 // Returns PlayerReadyMsg on success.
 func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, volume int) tea.Cmd {
 	return func() tea.Msg {
-		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
-		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("spruce-mpv-%d.sock", os.Getpid()))
+		socketDir, err := MpvSocketDir()
+		if err != nil {
+			logger.Error("failed to prepare mpv socket directory", "err", err)
+			return PlayerLaunchErrMsg{Err: err}
+		}
+		logger.Info("launching mpv", "startTime", startTime, "socketDir", socketDir)
+		socketPath := filepath.Join(socketDir, fmt.Sprintf("spruce-mpv-%d.sock", os.Getpid()))
 		// Remove stale socket
 		_ = os.Remove(socketPath)
 
