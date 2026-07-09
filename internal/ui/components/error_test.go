@@ -81,6 +81,7 @@ func TestIsUnauthorized(t *testing.T) {
 	}{
 		{nil, false},
 		{errors.New("unexpected status 401: Unauthorized"), true},
+		{errors.New("http request returned unexpected status status=401 body=\"\""), true},
 		{errors.New("something failed"), false},
 		{errors.New("unauthorized access"), true},
 	}

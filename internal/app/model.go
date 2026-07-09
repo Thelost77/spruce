@@ -2,10 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/Thelost77/spruce/internal/config"
@@ -72,21 +72,8 @@ type Model struct {
 	styles ui.Styles
 }
 
-type MprisState struct {
-	mu        sync.RWMutex
-	IsPlaying bool
-	IsPaused  bool
-	Title     string
-	Authors   []string
-	ItemID    string
-	Position  float64
-	Duration  float64
-	Speed     float64
-	Volume    int
-	QueueLen  int
-}
-
 func New(cfg *config.Config, mpv *player.Mpv) *Model {
+
 	actualCfg := config.Default()
 	if cfg != nil {
 		if cfg.Player.Speed != 0 {
@@ -185,7 +172,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 	m.mprisBridge = mpris.NewBridge(p)
 	state := m.mprisState
 	m.mprisBridge.Bind(func() mpris.ModelAccessor {
-		return mprisStateAccessor{state}
+		return state
 	})
 	m.mprisBridge.Start()
 }
@@ -245,6 +232,26 @@ func (m *Model) fetchMusicLibrariesCmd() tea.Cmd {
 		return musicLibrariesLoadedMsg{libraries: libs, err: err}
 	}
 }
+
+func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
+	logger.Warn("resetting session to login screen due to error or unauthorized status", "err", err)
+	var stopCmd tea.Cmd
+	if m.IsPlaying() {
+		m, stopCmd = m.stopPlayback()
+	}
+	m.tracks = nil
+	m.repeatTrackID = ""
+	if components.IsUnauthorized(err) && m.cfg != nil && hasSavedLogin(*m.cfg) {
+		m.cfg.Server.Token = ""
+		m.cfg.Server.UserID = ""
+		_ = config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg)
+	}
+	m.client = nil
+	m.playlistsScreen.SetClient(nil)
+	m.screen = ScreenLogin
+	return m, tea.Batch(stopCmd, m.err.SetError(err), m.loginScreen.Init())
+}
+
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.palette.Visible() {
@@ -465,15 +472,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenLibrary
 			return m, tea.Batch(m.libraryScreen.Init(), m.libraryScreen.FetchAllTracksCmd(), m.playlistsScreen.Init())
 		}
+		logger.Warn("failed to load music libraries", "err", msg.err, "count", len(msg.libraries))
+		var errMsg error
+		if msg.err != nil {
+			errMsg = msg.err
+		} else {
+			errMsg = errors.New("no music libraries found on server")
+		}
+		return m.handleAuthReset(errMsg)
 
-	case playlists.PlaylistsLoadedMsg, playlists.PlaylistTracksLoadedMsg:
+	case playlists.PlaylistsLoadedMsg:
 		var cmd tea.Cmd
 		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
+		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+			return m.handleAuthReset(msg.Err)
+		}
+		return m, cmd
+
+	case playlists.PlaylistTracksLoadedMsg:
+		var cmd tea.Cmd
+		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
+		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+			return m.handleAuthReset(msg.Err)
+		}
 		return m, cmd
 
 	case library.AllTracksLoadedMsg:
 		m.libraryScreen, _ = m.libraryScreen.Update(msg)
 		if msg.Err != nil {
+			if components.IsUnauthorized(msg.Err) {
+				return m.handleAuthReset(msg.Err)
+			}
 			return m, m.err.SetError(msg.Err)
 		}
 		return m, nil
@@ -765,59 +794,6 @@ func (m *Model) QueueLength() int {
 	return len(m.tracks)
 }
 
-type mprisStateAccessor struct{ s *MprisState }
-
-func (a mprisStateAccessor) IsPlaying() bool     { return a.s != nil && a.s.IsPlaying }
-func (a mprisStateAccessor) IsPaused() bool      { return a.s != nil && a.s.IsPaused }
-func (a mprisStateAccessor) HasActiveItem() bool { return a.s != nil && a.s.IsPlaying }
-func (a mprisStateAccessor) CurrentTitle() string {
-	if a.s != nil {
-		return a.s.Title
-	}
-	return ""
-}
-func (a mprisStateAccessor) CurrentAuthors() []string {
-	if a.s != nil {
-		return a.s.Authors
-	}
-	return nil
-}
-func (a mprisStateAccessor) CurrentItemID() string {
-	if a.s != nil {
-		return a.s.ItemID
-	}
-	return ""
-}
-func (a mprisStateAccessor) PlayerPosition() float64 {
-	if a.s != nil {
-		return a.s.Position
-	}
-	return 0
-}
-func (a mprisStateAccessor) PlayerDuration() float64 {
-	if a.s != nil {
-		return a.s.Duration
-	}
-	return 0
-}
-func (a mprisStateAccessor) PlayerSpeed() float64 {
-	if a.s != nil {
-		return a.s.Speed
-	}
-	return 1.0
-}
-func (a mprisStateAccessor) PlayerVolume() int {
-	if a.s != nil {
-		return a.s.Volume
-	}
-	return 100
-}
-func (a mprisStateAccessor) QueueLength() int {
-	if a.s != nil {
-		return a.s.QueueLen
-	}
-	return 0
-}
 
 func (m *Model) nextIndex(defaultNext int) int {
 	if m.repeatTrackID != "" {

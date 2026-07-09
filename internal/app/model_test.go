@@ -235,6 +235,40 @@ func TestInitWithSavedLoginFetchesLibrariesWithoutLoginScreen(t *testing.T) {
 	}
 }
 
+func TestInitWithSavedLoginFallbackOn401(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := config.Default()
+	cfg.Server.Address = "https://jellyfin.example.com"
+	cfg.Server.Token = "tok-expired"
+	cfg.Server.UserID = "usr-1"
+
+	m := New(&cfg, nil)
+	if m.screen != ScreenLibrary {
+		t.Fatalf("expected initial screen ScreenLibrary, got %v", m.screen)
+	}
+
+	authErr := errors.New("http request returned unexpected status status=401 body=\"\"")
+	msg := musicLibrariesLoadedMsg{err: authErr}
+
+	newM, _ := m.Update(msg)
+	updated := newM.(*Model)
+
+	if updated.screen != ScreenLogin {
+		t.Fatalf("expected transition to ScreenLogin on 401, got %v", updated.screen)
+	}
+	if updated.client != nil {
+		t.Fatal("expected client to be nil after 401 reset")
+	}
+	if !updated.err.HasError() {
+		t.Fatal("expected error banner to be set after 401 reset")
+	}
+	if updated.cfg.Server.Token != "" || updated.cfg.Server.UserID != "" {
+		t.Fatalf("expected token and user_id to be cleared in config on 401, got token=%q user=%q", updated.cfg.Server.Token, updated.cfg.Server.UserID)
+	}
+}
+
 func TestAppModel_CommandPaletteAndGlobalKeys(t *testing.T) {
 	m := New(nil, nil)
 	m.SetSize(80, 24)
@@ -429,8 +463,8 @@ func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
 	if m.PlayerVolume() == initialVol {
 		t.Errorf("expected volume to change after VolumeUp, got %d", m.PlayerVolume())
 	}
-	if m.mprisState == nil || m.mprisState.Volume != m.PlayerVolume() {
-		t.Errorf("expected mprisState volume to be synced to %d, got %v", m.PlayerVolume(), m.mprisState)
+	if m.mprisState == nil || m.mprisState.PlayerVolume() != m.PlayerVolume() {
+		t.Errorf("expected mprisState volume to be synced to %d, got %v", m.PlayerVolume(), m.mprisState.PlayerVolume())
 	}
 
 	initialSpeed := m.PlayerSpeed()
@@ -441,8 +475,8 @@ func TestAppModel_KeyboardVolumeSpeedMPRISSync(t *testing.T) {
 	if m.PlayerSpeed() == initialSpeed {
 		t.Errorf("expected speed to change after SpeedUp, got %f", m.PlayerSpeed())
 	}
-	if m.mprisState == nil || m.mprisState.Speed != m.PlayerSpeed() {
-		t.Errorf("expected mprisState speed to be synced to %f, got %v", m.PlayerSpeed(), m.mprisState)
+	if m.mprisState == nil || m.mprisState.PlayerSpeed() != m.PlayerSpeed() {
+		t.Errorf("expected mprisState speed to be synced to %f, got %v", m.PlayerSpeed(), m.mprisState.PlayerSpeed())
 	}
 }
 

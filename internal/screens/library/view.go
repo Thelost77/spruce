@@ -7,11 +7,6 @@ import (
 )
 
 func (m Model) View() string {
-	if m.loading {
-		status := m.styles.Muted.Render("loading library content...")
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, status)
-	}
-
 	if m.err != nil {
 		errStr := m.styles.Error.Render(fmt.Sprintf("error loading library: %v", m.err))
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, errStr)
@@ -24,3 +19,4 @@ func (m Model) View() string {
 		return m.albumList.View()
 	}
 }
+

@@ -171,43 +171,46 @@ func (m *Model) syncQueueScreen() {
 		m.playerState.Duration,
 	)
 	if m.mprisState != nil {
-		m.mprisState.mu.Lock()
-		oldState := *m.mprisState
-		m.mprisState.IsPlaying = m.IsPlaying()
-		m.mprisState.IsPaused = m.IsPaused()
-		if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
-			m.mprisState.Title = m.tracks[m.currentIndex].Name
-			m.mprisState.Authors = m.tracks[m.currentIndex].Artists
-			m.mprisState.ItemID = m.tracks[m.currentIndex].ID
-			if m.playerState.Duration <= 0 {
-				m.mprisState.Duration = m.tracks[m.currentIndex].Duration()
+		var oldState, newState MprisState
+		m.mprisState.Update(func(s *MprisState) {
+			oldState = *s
+			s.playing = m.IsPlaying()
+			s.paused = m.IsPaused()
+			s.hasActiveItem = m.IsPlaying()
+			if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+				s.title = m.tracks[m.currentIndex].Name
+				s.authors = m.tracks[m.currentIndex].Artists
+				s.itemID = m.tracks[m.currentIndex].ID
+				if m.playerState.Duration <= 0 {
+					s.duration = m.tracks[m.currentIndex].Duration()
+				} else {
+					s.duration = m.playerState.Duration
+				}
 			} else {
-				m.mprisState.Duration = m.playerState.Duration
+				s.title = ""
+				s.authors = nil
+				s.itemID = ""
+				s.duration = 0
 			}
-		} else {
-			m.mprisState.Title = ""
-			m.mprisState.Authors = nil
-			m.mprisState.ItemID = ""
-			m.mprisState.Duration = 0
-		}
-		m.mprisState.Position = m.playerState.Position
-		m.mprisState.Speed = m.playerState.Speed
-		m.mprisState.Volume = m.playerState.Volume
-		m.mprisState.QueueLen = len(m.tracks)
-		newState := *m.mprisState
-		m.mprisState.mu.Unlock()
+			s.position = m.playerState.Position
+			s.speed = m.playerState.Speed
+			s.volume = m.playerState.Volume
+			s.queueLength = len(m.tracks)
+			newState = *s
+		})
 
 		if m.mprisBridge != nil {
 			handler := m.mprisBridge.EventHandler()
 			if handler != nil && handler.Player != nil {
-				playbackChanged := oldState.IsPlaying != newState.IsPlaying ||
-					oldState.IsPaused != newState.IsPaused ||
-					oldState.Speed != newState.Speed
-				metadataChanged := oldState.Title != newState.Title ||
-					oldState.ItemID != newState.ItemID ||
-					!authorsEqual(oldState.Authors, newState.Authors)
-				volumeChanged := oldState.Volume != newState.Volume
-				positionChanged := oldState.Position != newState.Position
+				playbackChanged := oldState.playing != newState.playing ||
+					oldState.paused != newState.paused ||
+					oldState.speed != newState.speed
+				metadataChanged := oldState.title != newState.title ||
+					oldState.itemID != newState.itemID ||
+					!authorsEqual(oldState.authors, newState.authors)
+				volumeChanged := oldState.volume != newState.volume
+				positionChanged := oldState.position != newState.position
+
 
 				if playbackChanged {
 					_ = handler.Player.OnPlayback()
@@ -222,7 +225,7 @@ func (m *Model) syncQueueScreen() {
 					now := time.Now()
 					if now.Sub(m.lastMprisEmit) >= time.Second {
 						m.lastMprisEmit = now
-						pos := types.Microseconds(newState.Position * 1_000_000)
+						pos := types.Microseconds(newState.position * 1_000_000)
 						_ = handler.Player.OnSeek(pos)
 					}
 				}

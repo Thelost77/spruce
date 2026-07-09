@@ -97,8 +97,8 @@ func IsUnauthorized(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "status 401") || strings.Contains(msg, "unauthorized")
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "status 401") || strings.Contains(msg, "status=401") || strings.Contains(msg, "unauthorized")
 }
 
 // scheduleDismiss returns a command that sends ErrorDismissMsg after the timeout.

@@ -50,10 +50,13 @@ func MpvSocketDir() string {
 			mpvSocketDir = runtimeDir
 			return
 		}
-		mpvSocketDir = os.TempDir()
+		dir := filepath.Join(os.TempDir(), fmt.Sprintf("spruce-%d", os.Getuid()))
+		_ = os.MkdirAll(dir, 0700)
+		mpvSocketDir = dir
 	})
 	return mpvSocketDir
 }
+
 
 // Player defines the interface for media playback control.
 type Player interface {

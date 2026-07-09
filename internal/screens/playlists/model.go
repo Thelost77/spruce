@@ -2,6 +2,7 @@ package playlists
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/Thelost77/spruce/internal/logger"
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/ui"
+	"github.com/Thelost77/spruce/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -50,7 +52,7 @@ func New(styles ui.Styles) Model {
 	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
 
 	initList := func(title string) list.Model {
-		l := list.New(nil, del, 0, 0)
+		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
 		l.KeyMap.NextPage.SetKeys("pgdown", "f")
@@ -75,6 +77,7 @@ func New(styles ui.Styles) Model {
 		playlistList: initList("Playlists"),
 		trackList:    initList("Playlist Tracks"),
 		styles:       styles,
+		loading:      true,
 	}
 }
 
@@ -90,7 +93,7 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.client != nil && len(m.playlistList.Items()) == 0 {
+	if m.client != nil && len(m.playlists) == 0 {
 		return m.fetchPlaylistsCmd()
 	}
 	return nil
@@ -167,6 +170,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.level = LevelTracks
 			return m, cmd
 		}
+		m.level = LevelPlaylists
 		return m, nil
 
 	case tea.KeyMsg:
@@ -186,9 +190,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case "enter", "right":
 			if m.level == LevelPlaylists {
 				if sel, ok := m.playlistList.SelectedItem().(playlistItem); ok {
-					m.selectedPlaylist = sel.Playlist
-					m.loading = true
-					return m, m.fetchPlaylistTracksCmd(sel.Playlist.ID)
+					return m, m.SelectPlaylist(sel.Playlist)
 				}
 			}
 			if m.level == LevelTracks {
@@ -294,5 +296,8 @@ func (m Model) SelectedTrack() (jellyfin.Track, bool) {
 func (m *Model) SelectPlaylist(playlist jellyfin.Playlist) tea.Cmd {
 	m.selectedPlaylist = playlist
 	m.loading = true
+	m.level = LevelTracks
+	m.trackList.Title = fmt.Sprintf("Playlist Tracks — %s", playlist.Name)
+	m.trackList.SetItems(components.BuildSkeletonRows(m.styles))
 	return m.fetchPlaylistTracksCmd(playlist.ID)
 }

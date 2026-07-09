@@ -10,6 +10,7 @@ import (
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/logger"
 	"github.com/Thelost77/spruce/internal/ui"
+	"github.com/Thelost77/spruce/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -58,7 +59,7 @@ func New(styles ui.Styles) Model {
 	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
 
 	initList := func(title string) list.Model {
-		l := list.New(nil, del, 0, 0)
+		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
 		l.KeyMap.NextPage.SetKeys("pgdown", "f")
@@ -84,6 +85,7 @@ func New(styles ui.Styles) Model {
 		albumList:  initList("Albums"),
 		trackList:  initList("Tracks"),
 		styles:     styles,
+		loading:    true,
 	}
 }
 
@@ -121,7 +123,7 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.client != nil && len(m.musicLibraryIDs()) > 0 && len(m.albumList.Items()) == 0 {
+	if m.client != nil && len(m.musicLibraryIDs()) > 0 && len(m.albums) == 0 {
 		return m.fetchAllAlbumsCmd()
 	}
 	return nil
@@ -233,9 +235,11 @@ func (m *Model) RefreshCmd() tea.Cmd {
 	}
 	switch m.level {
 	case LevelAlbums:
+		m.albumList.SetItems(components.BuildSkeletonRows(m.styles))
 		return m.fetchAllAlbumsCmd()
 	case LevelTracks:
 		if m.selectedAlbum.ID != "" {
+			m.trackList.SetItems(components.BuildSkeletonRows(m.styles))
 			return m.fetchTracksCmd(m.selectedAlbum.ID)
 		}
 		return m.FetchAllTracksCmd()
@@ -331,6 +335,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.level = LevelTracks
 			return m, cmd
 		}
+		m.level = LevelAlbums
 		return m, nil
 
 	case AllTracksLoadedMsg:
@@ -398,9 +403,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			switch m.level {
 			case LevelAlbums:
 				if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
-					m.selectedAlbum = sel.Album
-					m.loading = true
-					return m, m.fetchTracksCmd(sel.Album.ID)
+					return m, m.SelectAlbum(sel.Album)
 				}
 			case LevelTracks:
 				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
@@ -535,5 +538,8 @@ func (m Model) HasActiveFilter() bool {
 func (m *Model) SelectAlbum(album jellyfin.Album) tea.Cmd {
 	m.selectedAlbum = album
 	m.loading = true
+	m.level = LevelTracks
+	m.trackList.Title = fmt.Sprintf("Tracks — %s", album.Name)
+	m.trackList.SetItems(components.BuildSkeletonRows(m.styles))
 	return m.fetchTracksCmd(album.ID)
 }
