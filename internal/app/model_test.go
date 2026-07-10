@@ -160,6 +160,32 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	}
 }
 
+func TestMPRISPlayAndPauseSetExplicitPlaybackState(t *testing.T) {
+	m := New(nil, nil)
+	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}}
+	m.currentIndex = 0
+	m.playerState.Playing = true
+
+	for _, tt := range []struct {
+		name    string
+		msg     tea.Msg
+		playing bool
+	}{
+		{name: "pause", msg: mpris.PauseMsg{}, playing: false},
+		{name: "pause remains paused", msg: mpris.PauseMsg{}, playing: false},
+		{name: "play", msg: mpris.PlayMsg{}, playing: true},
+		{name: "play remains playing", msg: mpris.PlayMsg{}, playing: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			updated, _ := m.Update(tt.msg)
+			m = updated.(*Model)
+			if m.playerState.Playing != tt.playing {
+				t.Fatalf("Playing = %v; want %v", m.playerState.Playing, tt.playing)
+			}
+		})
+	}
+}
+
 func TestNewAppliesConfiguredTheme(t *testing.T) {
 	cfg := config.Default()
 	cfg.Theme.Foreground = "#111111"

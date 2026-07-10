@@ -54,10 +54,10 @@ func TickCmd(p Player, generation uint64) tea.Cmd {
 	})
 }
 
-// TogglePauseCmd sends a pause toggle to mpv.
-func TogglePauseCmd(p Player, shouldPlay bool) tea.Cmd {
+// SetPauseCmd sets mpv's paused state.
+func SetPauseCmd(p Player, paused bool) tea.Cmd {
 	return func() tea.Msg {
-		err := p.SetPause(!shouldPlay)
+		err := p.SetPause(paused)
 		if err != nil {
 			return PositionMsg{Err: err}
 		}

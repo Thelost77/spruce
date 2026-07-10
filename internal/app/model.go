@@ -625,7 +625,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.playerState.Playing = !m.playerState.Playing
 			m.syncQueueScreen()
 			if m.mpv != nil {
-				return m, player.TogglePauseCmd(m.mpv, m.playerState.Playing)
+				return m, player.SetPauseCmd(m.mpv, !m.playerState.Playing)
 			}
 		case "next":
 			newM, cmd := m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
@@ -696,8 +696,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playerState.Playing = !m.playerState.Playing
 		m.syncQueueScreen()
 		if m.mpv != nil {
-			return m, player.TogglePauseCmd(m.mpv, m.playerState.Playing)
+			return m, player.SetPauseCmd(m.mpv, !m.playerState.Playing)
 		}
+
+	case mpris.PauseMsg:
+		return m.setPlaybackPaused(true)
+
+	case mpris.PlayMsg:
+		return m.setPlaybackPaused(false)
 
 	case mpris.NextMsg:
 		newM, cmd := m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))

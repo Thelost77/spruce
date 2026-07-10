@@ -86,6 +86,19 @@ func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *Model) setPlaybackPaused(paused bool) (*Model, tea.Cmd) {
+	if !m.IsPlaying() {
+		return m, nil
+	}
+
+	m.playerState.Playing = !paused
+	m.syncQueueScreen()
+	if m.mpv != nil {
+		return m, player.SetPauseCmd(m.mpv, paused)
+	}
+	return m, nil
+}
+
 func (m *Model) handlePositionMsg(msg player.PositionMsg) (*Model, tea.Cmd) {
 	if msg.Generation != m.playGeneration {
 		return m, nil

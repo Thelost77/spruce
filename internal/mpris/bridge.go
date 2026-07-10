@@ -59,7 +59,7 @@ func (b *Bridge) Bind(accessor func() ModelAccessor) {
 			return nil
 		},
 		Pause: func() error {
-			b.send(PlayPauseMsg{})
+			b.send(PauseMsg{})
 			return nil
 		},
 		PlayPause: func() error {
@@ -67,11 +67,11 @@ func (b *Bridge) Bind(accessor func() ModelAccessor) {
 			return nil
 		},
 		Stop: func() error {
-			b.send(PlayPauseMsg{})
+			b.send(PauseMsg{})
 			return nil
 		},
 		Play: func() error {
-			b.send(PlayPauseMsg{})
+			b.send(PlayMsg{})
 			return nil
 		},
 		Seek: func(offset types.Microseconds) error {

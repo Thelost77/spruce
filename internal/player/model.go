@@ -153,7 +153,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.PlayPause):
 		m.Playing = !m.Playing
 		if m.player != nil {
-			return m, TogglePauseCmd(m.player, m.Playing)
+			return m, SetPauseCmd(m.player, !m.Playing)
 		}
 		return m, nil
 

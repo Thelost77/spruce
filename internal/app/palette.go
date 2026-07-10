@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Thelost77/spruce/internal/ui/components"
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/player"
 	"github.com/Thelost77/spruce/internal/screens/library"
 	"github.com/Thelost77/spruce/internal/screens/metadataedit"
 	"github.com/Thelost77/spruce/internal/screens/playlists"
 	"github.com/Thelost77/spruce/internal/screens/queue"
+	"github.com/Thelost77/spruce/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 )
@@ -188,7 +188,7 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 		m.playerState.Playing = !m.playerState.Playing
 		m.syncQueueScreen()
 		if m.mpv != nil {
-			return m, player.TogglePauseCmd(m.mpv, m.playerState.Playing)
+			return m, player.SetPauseCmd(m.mpv, !m.playerState.Playing)
 		}
 		return m, nil
 	case components.ActionSeekForward:
