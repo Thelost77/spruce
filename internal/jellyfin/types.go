@@ -1,5 +1,10 @@
 package jellyfin
 
+import (
+	"cmp"
+	"slices"
+)
+
 // AuthRequest is the payload sent to POST /Users/AuthenticateByName.
 type AuthRequest struct {
 	Username string `json:"Username"`
@@ -56,6 +61,16 @@ type Track struct {
 	AlbumID           string   `json:"AlbumId,omitempty"`
 	Album             string   `json:"Album,omitempty"`
 	Artists           []string `json:"Artists,omitempty"`
+}
+
+// SortAlbumTracks orders tracks by disc and track number while retaining source order for ties.
+func SortAlbumTracks(tracks []Track) {
+	slices.SortStableFunc(tracks, func(a, b Track) int {
+		return cmp.Or(
+			cmp.Compare(a.ParentIndexNumber, b.ParentIndexNumber),
+			cmp.Compare(a.IndexNumber, b.IndexNumber),
+		)
+	})
 }
 
 // Duration returns the duration of the track in seconds.

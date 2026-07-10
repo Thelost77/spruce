@@ -313,19 +313,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = msg.Err
 		if msg.Err == nil {
 			m.tracks = append([]jellyfin.Track(nil), msg.Tracks...)
-			slices.SortFunc(m.tracks, func(a, b jellyfin.Track) int {
-				c := libraryCollator.CompareString(a.Name, b.Name)
-				if c != 0 {
-					return c
-				}
-				if a.ParentIndexNumber != b.ParentIndexNumber {
-					return a.ParentIndexNumber - b.ParentIndexNumber
-				}
-				if a.IndexNumber != b.IndexNumber {
-					return a.IndexNumber - b.IndexNumber
-				}
-				return strings.Compare(a.ID, b.ID)
-			})
+			jellyfin.SortAlbumTracks(m.tracks)
 			items := make([]list.Item, len(m.tracks))
 			for i, t := range m.tracks {
 				items[i] = trackItem{Track: t}

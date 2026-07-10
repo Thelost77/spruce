@@ -317,6 +317,7 @@ func (c *Client) GetTracks(ctx context.Context, albumID string) ([]Track, error)
 	if err != nil {
 		return nil, fmt.Errorf("get tracks: %w", err)
 	}
+	SortAlbumTracks(items)
 	return items, nil
 }
 

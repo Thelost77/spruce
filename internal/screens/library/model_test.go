@@ -213,20 +213,19 @@ func TestLibraryModel_SortsLibraryItemsAlphabetically(t *testing.T) {
 	}
 
 	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
-		{ID: "z", Name: "Zebra"},
-		{ID: "s2", Name: "Świt"},
-		{ID: "a", Name: "alpha"},
-		{ID: "b", Name: "Beta"},
-		{ID: "s1", Name: "Siano"},
+		{ID: "t-12", Name: "Cemetery Drive", ParentIndexNumber: 1, IndexNumber: 12},
+		{ID: "t-2", Name: "Give 'Em Hell, Kid", ParentIndexNumber: 1, IndexNumber: 2},
+		{ID: "t-10", Name: "Hang 'Em High", ParentIndexNumber: 1, IndexNumber: 10},
+		{ID: "t-1", Name: "Helena", ParentIndexNumber: 1, IndexNumber: 1},
 	}})
 
 	gotAlbumTracks := m.Tracks()
-	if got := trackNames(gotAlbumTracks); got[0] != "alpha" || got[1] != "Beta" || got[2] != "Siano" || got[3] != "Świt" || got[4] != "Zebra" {
-		t.Fatalf("album tracks sorted = %v, want [alpha Beta Siano Świt Zebra]", got)
+	if got := trackNames(gotAlbumTracks); got[0] != "Helena" || got[1] != "Give 'Em Hell, Kid" || got[2] != "Hang 'Em High" || got[3] != "Cemetery Drive" {
+		t.Fatalf("album tracks sorted = %v, want [Helena Give 'Em Hell, Kid Hang 'Em High Cemetery Drive]", got)
 	}
 	firstTrackItem, ok := m.trackList.Items()[0].(trackItem)
-	if !ok || firstTrackItem.Track.Name != "alpha" {
-		t.Fatalf("first visible track = %#v, want alpha", m.trackList.Items()[0])
+	if !ok || firstTrackItem.Track.Name != "Helena" {
+		t.Fatalf("first visible track = %#v, want Helena", m.trackList.Items()[0])
 	}
 }
 

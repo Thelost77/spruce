@@ -94,7 +94,12 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 			})
 		case itemTypes == "Audio" && parentID == "alb-1":
 			_ = json.NewEncoder(w).Encode(itemsResponse[Track]{
-				Items: []Track{{ID: "trk-1", Name: "Time", RunTimeTicks: 4230000000, Artists: []string{"Pink Floyd"}}},
+				Items: []Track{
+					{ID: "trk-12", Name: "Cemetery Drive", ParentIndexNumber: 1, IndexNumber: 12},
+					{ID: "trk-2", Name: "Give 'Em Hell, Kid", ParentIndexNumber: 1, IndexNumber: 2},
+					{ID: "trk-10", Name: "Hang 'Em High", ParentIndexNumber: 1, IndexNumber: 10},
+					{ID: "trk-1", Name: "Helena", ParentIndexNumber: 1, IndexNumber: 1, RunTimeTicks: 4230000000, Artists: []string{"Pink Floyd"}},
+				},
 			})
 		case itemTypes == "Audio" && parentID == "lib-1":
 			_ = json.NewEncoder(w).Encode(itemsResponse[Track]{
@@ -125,7 +130,7 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 	}
 
 	tracks, err := client.GetTracks(ctx, "alb-1")
-	if err != nil || len(tracks) != 1 || tracks[0].Name != "Time" {
+	if err != nil || len(tracks) != 4 || tracks[0].Name != "Helena" || tracks[1].Name != "Give 'Em Hell, Kid" || tracks[2].Name != "Hang 'Em High" || tracks[3].Name != "Cemetery Drive" {
 		t.Fatalf("GetTracks failed: %+v, err=%v", tracks, err)
 	}
 	if tracks[0].Duration() != 423.0 {
