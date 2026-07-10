@@ -3,8 +3,10 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -243,13 +245,19 @@ func TestInitWithSavedLoginFallbackOn401(t *testing.T) {
 	cfg.Server.Address = "https://jellyfin.example.com"
 	cfg.Server.Token = "tok-expired"
 	cfg.Server.UserID = "usr-1"
+	cfg.Server.DeviceName = "Test device"
+	cfg.Server.DeviceID = "test-device"
+	path := filepath.Join(config.ConfigDir(), "config.toml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
 
 	m := New(&cfg, nil)
 	if m.screen != ScreenLibrary {
 		t.Fatalf("expected initial screen ScreenLibrary, got %v", m.screen)
 	}
 
-	authErr := errors.New("http request returned unexpected status status=401 body=\"\"")
+	authErr := fmt.Errorf("load libraries: %w", &jellyfin.HTTPStatusError{StatusCode: http.StatusUnauthorized})
 	msg := musicLibrariesLoadedMsg{err: authErr}
 
 	newM, _ := m.Update(msg)
@@ -264,8 +272,15 @@ func TestInitWithSavedLoginFallbackOn401(t *testing.T) {
 	if !updated.err.HasError() {
 		t.Fatal("expected error banner to be set after 401 reset")
 	}
-	if updated.cfg.Server.Token != "" || updated.cfg.Server.UserID != "" {
-		t.Fatalf("expected token and user_id to be cleared in config on 401, got token=%q user=%q", updated.cfg.Server.Token, updated.cfg.Server.UserID)
+	if updated.cfg.Server.Token != "tok-expired" || updated.cfg.Server.UserID != "usr-1" {
+		t.Fatalf("expected credentials preserved in config on 401, got token=%q user=%q", updated.cfg.Server.Token, updated.cfg.Server.UserID)
+	}
+	reloaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if reloaded.Server.Token != "tok-expired" || reloaded.Server.UserID != "usr-1" {
+		t.Fatalf("expected credentials preserved on disk, got token=%q user=%q", reloaded.Server.Token, reloaded.Server.UserID)
 	}
 }
 
@@ -295,11 +310,26 @@ func TestMusicLibrariesLoadErrorKeepsSessionUnlessUnauthorized(t *testing.T) {
 	}
 }
 
+func TestMusicLibrariesUnauthorizedTextDoesNotResetSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.Address = "https://jellyfin.example.com"
+	cfg.Server.Token = "tok-valid"
+	cfg.Server.UserID = "usr-1"
+	m := New(&cfg, nil)
+	client := m.client
+
+	updated, _ := m.Update(musicLibrariesLoadedMsg{err: errors.New("request says unauthorized but has no HTTP status")})
+	m = updated.(*Model)
+	if m.screen != ScreenLibrary || m.client != client {
+		t.Fatalf("text-only unauthorized error reset session: screen=%v client=%v", m.screen, m.client)
+	}
+}
+
 func TestLibraryLoadUnauthorizedResetsPlaybackAndQueue(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
-	authErr := errors.New("unexpected status 401")
+	authErr := fmt.Errorf("load library: %w", &jellyfin.HTTPStatusError{StatusCode: http.StatusUnauthorized})
 	for name, msg := range map[string]tea.Msg{
 		"albums": library.AlbumsLoadedMsg{Err: authErr},
 		"tracks": library.TracksLoadedMsg{Err: authErr},
@@ -336,8 +366,8 @@ func TestLibraryLoadUnauthorizedResetsPlaybackAndQueue(t *testing.T) {
 			if m.repeatTrackID != "" || m.repeatQueue || m.playerState.RepeatStatus != "" {
 				t.Fatalf("expected cleared repeat state, track=%q queue=%v status=%q", m.repeatTrackID, m.repeatQueue, m.playerState.RepeatStatus)
 			}
-			if m.cfg.Server.Token != "" || m.cfg.Server.UserID != "" {
-				t.Fatalf("expected cleared credentials, token=%q user=%q", m.cfg.Server.Token, m.cfg.Server.UserID)
+			if m.cfg.Server.Token != "tok-expired" || m.cfg.Server.UserID != "usr-1" {
+				t.Fatalf("expected preserved credentials, token=%q user=%q", m.cfg.Server.Token, m.cfg.Server.UserID)
 			}
 		})
 	}

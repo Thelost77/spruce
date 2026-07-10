@@ -42,15 +42,19 @@ type Client struct {
 	baseURL    string
 	token      string
 	userID     string
+	deviceName string
+	deviceID   string
 	httpClient *http.Client
 }
 
 // NewClient creates a new Jellyfin API client.
-func NewClient(baseURL, token, userID string) *Client {
+func NewClient(baseURL, token, userID, deviceName, deviceID string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		userID:  userID,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		token:      token,
+		userID:     userID,
+		deviceName: deviceName,
+		deviceID:   deviceID,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -80,7 +84,7 @@ func (c *Client) SetAuth(token, userID string) {
 
 // authHeader constructs the MediaBrowser Authorization header string.
 func (c *Client) authHeader() string {
-	header := `MediaBrowser Client="spruce", Device="Linux", DeviceId="spruce-tui", Version="1.0.0"`
+	header := `MediaBrowser Client="spruce", Device="` + c.deviceName + `", DeviceId="` + c.deviceID + `", Version="1.0.0"`
 	if c.token != "" {
 		header += `, Token="` + c.token + `"`
 	}
@@ -93,7 +97,7 @@ func (c *Client) StreamURL(itemID, playSessionID string) string {
 	q.Set("static", "true")
 	q.Set("api_key", c.token)
 	q.Set("playSessionId", playSessionID)
-	q.Set("deviceId", "spruce-tui")
+	q.Set("deviceId", c.deviceID)
 	return fmt.Sprintf("%s/Audio/%s/stream?%s", c.baseURL, itemID, q.Encode())
 }
 

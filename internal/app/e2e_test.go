@@ -282,9 +282,9 @@ func TestE2E(t *testing.T) {
 
 	t.Run("G2_stream_url_carries_api_key_session_device", func(t *testing.T) {
 		mj := newMockJellyfin(t, 1)
-		c := jellyfin.NewClient(mj.URL, "tok-1", "usr-1")
+		c := jellyfin.NewClient(mj.URL, "tok-1", "usr-1", "Test device", "spruce-test-a41c29ef")
 		url := c.StreamURL("trk-1", "sess-1")
-		for _, want := range []string{"api_key=tok-1", "playSessionId=sess-1", "deviceId=spruce-tui", "static=true"} {
+		for _, want := range []string{"api_key=tok-1", "playSessionId=sess-1", "deviceId=spruce-test-a41c29ef", "static=true"} {
 			if !strings.Contains(url, want) {
 				t.Errorf("StreamURL %q missing %q", url, want)
 			}

@@ -92,15 +92,6 @@ func enrichMessage(msg string) string {
 	return msg
 }
 
-// IsUnauthorized returns true if the error message indicates HTTP 401.
-func IsUnauthorized(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "status 401") || strings.Contains(msg, "status=401") || strings.Contains(msg, "unauthorized")
-}
-
 // scheduleDismiss returns a command that sends ErrorDismissMsg after the timeout.
 func scheduleDismiss() tea.Cmd {
 	return tea.Tick(ErrorDismissTimeout, func(_ time.Time) tea.Msg {

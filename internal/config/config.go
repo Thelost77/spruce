@@ -2,18 +2,25 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 )
 
 type ServerConfig struct {
-	Address  string `toml:"address"`
-	Username string `toml:"username"`
-	Token    string `toml:"token"`
-	UserID   string `toml:"user_id"`
+	Address    string `toml:"address"`
+	Username   string `toml:"username"`
+	Token      string `toml:"token"`
+	UserID     string `toml:"user_id"`
+	DeviceName string `toml:"device_name"`
+	DeviceID   string `toml:"device_id"`
 }
 
 type PlayerConfig struct {
@@ -97,12 +104,18 @@ func Load(path string) (Config, error) {
 	cfg := Default()
 
 	if path == "" {
+		if _, err := ensureDevice(&cfg); err != nil {
+			return Config{}, err
+		}
 		return cfg, nil
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if _, err := ensureDevice(&cfg); err != nil {
+				return Config{}, err
+			}
 			return cfg, nil
 		}
 		return cfg, err
@@ -111,8 +124,60 @@ func Load(path string) (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
+	changed, err := ensureDevice(&cfg)
+	if err != nil {
+		return Config{}, err
+	}
+	if changed {
+		if err := Save(path, cfg); err != nil {
+			return Config{}, fmt.Errorf("persist device identity migration: %w", err)
+		}
+	}
 
 	return cfg, nil
+}
+
+func ensureDevice(cfg *Config) (bool, error) {
+	changed := false
+	if cfg.Server.DeviceName == "" {
+		hostname, err := os.Hostname()
+		if err != nil || hostname == "" {
+			hostname = "This device"
+		}
+		cfg.Server.DeviceName = hostname + " (Spruce)"
+		changed = true
+	}
+	if cfg.Server.DeviceID == "" {
+		var suffix [4]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return false, fmt.Errorf("generate device ID: %w", err)
+		}
+		cfg.Server.DeviceID = "spruce-" + normalizeHostname() + "-" + hex.EncodeToString(suffix[:])
+		changed = true
+	}
+	return changed, nil
+}
+
+func normalizeHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "device"
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(hostname) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	if normalized := strings.Trim(b.String(), "-"); normalized != "" {
+		return normalized
+	}
+	return "device"
 }
 
 // ConfigDir returns the spruce configuration directory path.

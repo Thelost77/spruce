@@ -82,9 +82,7 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 		if cfg.Player.SeekSeconds != 0 {
 			actualCfg.Player.SeekSeconds = cfg.Player.SeekSeconds
 		}
-		if cfg.Server.Address != "" {
-			actualCfg.Server = cfg.Server
-		}
+		actualCfg.Server = cfg.Server
 		if cfg.Theme.Background != "" {
 			actualCfg.Theme = cfg.Theme
 		}
@@ -136,17 +134,19 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 	pal := components.NewPalette()
 	pal.SetStyles(styles)
 	playlistsScreen := playlists.New(styles)
+	loginScreen := login.New(styles)
+	loginScreen.SetDeviceIdentity(actualCfg.Server.DeviceName, actualCfg.Server.DeviceID)
 	initialScreen := ScreenLogin
 	var client *jellyfin.Client
 	if hasSavedLogin(actualCfg) {
-		client = jellyfin.NewClient(actualCfg.Server.Address, actualCfg.Server.Token, actualCfg.Server.UserID)
+		client = jellyfin.NewClient(actualCfg.Server.Address, actualCfg.Server.Token, actualCfg.Server.UserID, actualCfg.Server.DeviceName, actualCfg.Server.DeviceID)
 		playlistsScreen.SetClient(client)
 		initialScreen = ScreenLibrary
 	}
 	return &Model{
 		screen:          initialScreen,
 		keys:            DefaultKeyMap(actualCfg.Keybinds),
-		loginScreen:     login.New(styles),
+		loginScreen:     loginScreen,
 		libraryScreen:   library.New(styles),
 		playlistsScreen: playlistsScreen,
 		queueScreen:     queue.New(styles),
@@ -245,11 +245,6 @@ func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
 	m.repeatQueue = false
 	m.playerState.RepeatStatus = ""
 	m.syncQueueScreen()
-	if components.IsUnauthorized(err) && m.cfg != nil && hasSavedLogin(*m.cfg) {
-		m.cfg.Server.Token = ""
-		m.cfg.Server.UserID = ""
-		_ = config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg)
-	}
 	m.client = nil
 	m.playlistsScreen.SetClient(nil)
 	m.screen = ScreenLogin
@@ -463,7 +458,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.err.SetError(fmt.Errorf("Failed to save config: %w", err))
 			}
 		}
-		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID)
+		deviceName, deviceID := "", ""
+		if m.cfg != nil {
+			deviceName = m.cfg.Server.DeviceName
+			deviceID = m.cfg.Server.DeviceID
+		}
+		m.client = jellyfin.NewClient(msg.ServerURL, msg.Token, msg.UserID, deviceName, deviceID)
 		m.playlistsScreen.SetClient(m.client)
 		var cmd tea.Cmd
 		m.loginScreen, cmd = m.loginScreen.Update(msg)
@@ -482,7 +482,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			errMsg = errors.New("no music libraries found on server")
 		}
-		if components.IsUnauthorized(errMsg) {
+		if jellyfin.IsHTTPStatus(errMsg, 401) {
 			return m.handleAuthReset(errMsg)
 		}
 		return m, m.err.SetError(errMsg)
@@ -490,7 +490,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playlists.PlaylistsLoadedMsg:
 		var cmd tea.Cmd
 		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
-		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+		if msg.Err != nil && jellyfin.IsHTTPStatus(msg.Err, 401) {
 			return m.handleAuthReset(msg.Err)
 		}
 		return m, cmd
@@ -498,7 +498,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playlists.PlaylistTracksLoadedMsg:
 		var cmd tea.Cmd
 		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
-		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+		if msg.Err != nil && jellyfin.IsHTTPStatus(msg.Err, 401) {
 			return m.handleAuthReset(msg.Err)
 		}
 		return m, cmd
@@ -506,7 +506,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case library.AlbumsLoadedMsg:
 		var cmd tea.Cmd
 		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
-		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+		if msg.Err != nil && jellyfin.IsHTTPStatus(msg.Err, 401) {
 			return m.handleAuthReset(msg.Err)
 		}
 		return m, cmd
@@ -514,7 +514,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case library.TracksLoadedMsg:
 		var cmd tea.Cmd
 		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
-		if msg.Err != nil && components.IsUnauthorized(msg.Err) {
+		if msg.Err != nil && jellyfin.IsHTTPStatus(msg.Err, 401) {
 			return m.handleAuthReset(msg.Err)
 		}
 		return m, cmd
@@ -523,7 +523,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
 		if msg.Err != nil {
-			if components.IsUnauthorized(msg.Err) {
+			if jellyfin.IsHTTPStatus(msg.Err, 401) {
 				return m.handleAuthReset(msg.Err)
 			}
 			return m, m.err.SetError(msg.Err)

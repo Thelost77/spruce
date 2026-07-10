@@ -42,7 +42,7 @@ func TestPlaylistsModel_NavigationAndQueueActions(t *testing.T) {
 
 	m := New(ui.DefaultStyles())
 	m.SetSize(80, 24)
-	m.SetClient(jellyfin.NewClient(server.URL, "tok", "usr"))
+	m.SetClient(jellyfin.NewClient(server.URL, "tok", "usr", "Test device", "test-device"))
 
 	cmd := m.Init()
 	if cmd == nil {

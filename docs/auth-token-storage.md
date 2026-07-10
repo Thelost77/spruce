@@ -38,3 +38,10 @@ user id are present.
 On authentication failure, Spruce may return to the login screen, but it should
 not erase the saved token automatically. A successful login can overwrite stale
 credentials.
+
+## Jellyfin device identity
+
+`server.device_name` and `server.device_id` identify this Spruce installation to
+Jellyfin. Missing fields are migrated when config loads: the name is based on
+the hostname and the ID is a stable hostname-derived value with a random suffix.
+Keep `device_id` stable; changing `device_name` does not create a new device.

@@ -17,6 +17,9 @@ func TestClient_Login(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %q", r.Method)
 		}
+		if got := r.Header.Get("Authorization"); !strings.Contains(got, `Device="Manual device"`) || !strings.Contains(got, `DeviceId="manual-id"`) {
+			t.Errorf("unexpected device identity: %q", got)
+		}
 		var req AuthRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode req: %v", err)
@@ -33,7 +36,7 @@ func TestClient_Login(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "")
+	client := NewClient(server.URL, "", "", "Manual device", "manual-id")
 	res, err := client.Login(context.Background(), "alice", "secret")
 	if err != nil {
 		t.Fatalf("Login error: %v", err)
@@ -62,7 +65,7 @@ func TestClient_GetMusicLibraries(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "token-xyz", "user-123")
+	client := NewClient(server.URL, "token-xyz", "user-123", "Mac Mini (Spruce)", "spruce-mac-mini-a41c29ef")
 	libs, err := client.GetMusicLibraries(context.Background())
 	if err != nil {
 		t.Fatalf("GetMusicLibraries error: %v", err)
@@ -103,7 +106,7 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "token-xyz", "user-123")
+	client := NewClient(server.URL, "token-xyz", "user-123", "Test device", "test-device-1")
 	ctx := context.Background()
 
 	artists, err := client.GetArtists(ctx, "lib-1")
@@ -158,7 +161,7 @@ func TestClient_GetPlaylists(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "token-xyz", "user-123")
+	client := NewClient(server.URL, "token-xyz", "user-123", "Test device", "test-device-2")
 	playlists, err := client.GetPlaylists(context.Background())
 	if err != nil {
 		t.Fatalf("GetPlaylists error: %v", err)
@@ -202,15 +205,18 @@ func TestClient_StreamHelpersAndProgress(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "token-xyz", "user-123")
+	client := NewClient(server.URL, "token-xyz", "user-123", "Mac Mini (Spruce)", "spruce-mac-mini-a41c29ef")
 	streamURL := client.StreamURL("trk-1", "test-session")
-	wantQuery := "api_key=token-xyz&deviceId=spruce-tui&playSessionId=test-session&static=true"
+	wantQuery := "api_key=token-xyz&deviceId=spruce-mac-mini-a41c29ef&playSessionId=test-session&static=true"
 	if streamURL != server.URL+"/Audio/trk-1/stream?"+wantQuery {
 		t.Errorf("unexpected StreamURL: %q", streamURL)
 	}
 	headers := client.StreamHeaders()
 	if len(headers) != 1 || !strings.HasPrefix(headers[0], "Authorization: MediaBrowser") {
 		t.Errorf("unexpected StreamHeaders: %v", headers)
+	}
+	if !strings.Contains(headers[0], `Device="Mac Mini (Spruce)"`) || !strings.Contains(headers[0], `DeviceId="spruce-mac-mini-a41c29ef"`) {
+		t.Errorf("unexpected device identity header: %v", headers)
 	}
 
 	err := client.ReportPlaybackProgress(context.Background(), "trk-1", 12.0, false, "sess-1")

@@ -34,13 +34,21 @@ type LoginFailedMsg struct {
 
 // Model is the bubbletea model for the login screen.
 type Model struct {
-	inputs  [numFields]textinput.Model
-	focused int
-	err     error
-	loading bool
-	width   int
-	height  int
-	styles  ui.Styles
+	inputs     [numFields]textinput.Model
+	focused    int
+	err        error
+	loading    bool
+	width      int
+	height     int
+	styles     ui.Styles
+	deviceName string
+	deviceID   string
+}
+
+// SetDeviceIdentity configures the Jellyfin device reported during login.
+func (m *Model) SetDeviceIdentity(name, id string) {
+	m.deviceName = name
+	m.deviceID = id
 }
 
 // New creates a new login screen model.
@@ -155,7 +163,7 @@ func (m *Model) loginCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		logger.Info("login attempt started", "server", serverURL, "username", username)
-		client := jellyfin.NewClient(serverURL, "", "")
+		client := jellyfin.NewClient(serverURL, "", "", m.deviceName, m.deviceID)
 		resp, err := client.Login(context.Background(), username, password)
 		if err != nil {
 			logger.Warn("login attempt failed", "server", serverURL, "username", username, "err", err)

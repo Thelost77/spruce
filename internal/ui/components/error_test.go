@@ -74,28 +74,6 @@ func TestEnrichMessageNormalError(t *testing.T) {
 	}
 }
 
-func TestIsUnauthorized(t *testing.T) {
-	tests := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{errors.New("unexpected status 401: Unauthorized"), true},
-		{errors.New("http request returned unexpected status status=401 body=\"\""), true},
-		{errors.New("something failed"), false},
-		{errors.New("unauthorized access"), true},
-	}
-	for _, tt := range tests {
-		if got := IsUnauthorized(tt.err); got != tt.want {
-			name := "<nil>"
-			if tt.err != nil {
-				name = tt.err.Error()
-			}
-			t.Errorf("IsUnauthorized(%q) = %v, want %v", name, got, tt.want)
-		}
-	}
-}
-
 func TestErrorReturnsStoredError(t *testing.T) {
 	b := NewErrorBanner(defaultTestStyle())
 	err := errors.New("test error")

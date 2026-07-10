@@ -42,7 +42,7 @@ func TestLibraryModel_NavigationAndPlayback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := jellyfin.NewClient(server.URL, "tok", "usr")
+	client := jellyfin.NewClient(server.URL, "tok", "usr", "Test device", "test-device-1")
 	m := New(ui.DefaultStyles())
 	m.SetSize(80, 24)
 	m.SetClient(client, "lib-1")
@@ -127,7 +127,7 @@ func TestLibraryModel_Actions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := jellyfin.NewClient(server.URL, "tok", "usr")
+	client := jellyfin.NewClient(server.URL, "tok", "usr", "Test device", "test-device-2")
 	m := New(ui.DefaultStyles())
 	m.SetSize(80, 24)
 	m.SetClient(client, "lib-1")
@@ -273,7 +273,7 @@ func TestLibraryModel_FetchesAcrossMusicLibraries(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := jellyfin.NewClient(server.URL, "tok", "usr")
+	client := jellyfin.NewClient(server.URL, "tok", "usr", "Test device", "test-device-3")
 	m := New(ui.DefaultStyles())
 	m.SetLibraries(client, []jellyfin.Library{
 		{ID: "lib-1", Name: "Main", CollectionType: "music"},

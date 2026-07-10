@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,6 +53,71 @@ func TestLoadEmptyPathReturnsDefaults(t *testing.T) {
 	}
 	if cfg.Theme.Info != "#7fbbb3" {
 		t.Errorf("expected info #7fbbb3, got %q", cfg.Theme.Info)
+	}
+}
+
+func TestLoadMigratesAndPersistsDeviceIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	contents := "[server]\naddress = \"https://jellyfin.example.com\"\nusername = \"alice\"\ntoken = \"token\"\nuser_id = \"user\"\n\n[theme]\naccent = \"#123456\"\n"
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.DeviceName == "" || cfg.Server.DeviceID == "" {
+		t.Fatalf("missing migrated identity: %+v", cfg.Server)
+	}
+	if cfg.Server.Token != "token" || cfg.Server.UserID != "user" || cfg.Theme.Accent != "#123456" {
+		t.Fatalf("migration lost config values: %+v", cfg)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Server.DeviceID != cfg.Server.DeviceID || reloaded.Server.DeviceName != cfg.Server.DeviceName {
+		t.Fatalf("identity not stable: first=%+v reload=%+v", cfg.Server, reloaded.Server)
+	}
+}
+
+func TestLoadGeneratesDistinctDeviceIDs(t *testing.T) {
+	first, err := Load(filepath.Join(t.TempDir(), "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Load(filepath.Join(t.TempDir(), "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Server.DeviceID == second.Server.DeviceID || !strings.HasPrefix(first.Server.DeviceID, "spruce-") {
+		t.Fatalf("unexpected device IDs: %q, %q", first.Server.DeviceID, second.Server.DeviceID)
+	}
+}
+
+func TestLoadPreservesManualDeviceIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	contents := "[server]\ndevice_name = \"Wiktor's Mac\"\ndevice_id = \"manual-mac-id\"\n"
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.DeviceName != "Wiktor's Mac" || cfg.Server.DeviceID != "manual-mac-id" {
+		t.Fatalf("manual identity changed: %+v", cfg.Server)
+	}
+	cfg.Server.DeviceName = "Renamed Mac"
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Server.DeviceName != "Renamed Mac" || reloaded.Server.DeviceID != "manual-mac-id" {
+		t.Fatalf("rename changed device ID: %+v", reloaded.Server)
 	}
 }
 
