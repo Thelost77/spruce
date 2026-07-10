@@ -59,6 +59,7 @@ func defaultGroups() []HelpGroup {
 				{Key: "a", Desc: "add track / album to queue"},
 				{Key: "A", Desc: "queue album"},
 				{Key: "S", Desc: "shuffle album to queue"},
+				{Key: "t", Desc: "toggle track sort"},
 				{Key: "m", Desc: "edit metadata"},
 			},
 		},

@@ -2,8 +2,10 @@ package library
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
@@ -60,7 +62,7 @@ func TestLibraryModel_NavigationAndPlayback(t *testing.T) {
 		t.Fatalf("expected 1 album item, got %d", len(m.albumList.Items()))
 	}
 
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected fetch tracks cmd")
 	}
@@ -226,6 +228,119 @@ func TestLibraryModel_SortsLibraryItemsAlphabetically(t *testing.T) {
 	firstTrackItem, ok := m.trackList.Items()[0].(trackItem)
 	if !ok || firstTrackItem.Track.Name != "Helena" {
 		t.Fatalf("first visible track = %#v, want Helena", m.trackList.Items()[0])
+	}
+}
+
+func TestLibraryModel_TogglesAlbumTrackSort(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m.selectedAlbum = jellyfin.Album{Name: "Three Cheers for Sweet Revenge"}
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "t-12", Name: "Cemetery Drive", ParentIndexNumber: 1, IndexNumber: 12},
+		{ID: "t-2", Name: "Give 'Em Hell, Kid", ParentIndexNumber: 1, IndexNumber: 2},
+		{ID: "t-10", Name: "Hang 'Em High", ParentIndexNumber: 1, IndexNumber: 10},
+		{ID: "t-1", Name: "Helena", ParentIndexNumber: 1, IndexNumber: 1},
+	}})
+
+	m.trackList.Select(0)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Cemetery Drive", "Give 'Em Hell, Kid", "Hang 'Em High", "Helena"}) {
+		t.Fatalf("title order = %v", got)
+	}
+	if m.trackList.Title != "Tracks — Three Cheers for Sweet Revenge [title]" {
+		t.Fatalf("title = %q", m.trackList.Title)
+	}
+	if selected, ok := m.SelectedTrack(); !ok || selected.ID != "t-1" {
+		t.Fatalf("selected track = %+v, %v; want Helena", selected, ok)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	queued, ok := cmd().(AddTracksToQueueMsg)
+	if !ok || !slices.Equal(trackNames(queued.Tracks), []string{"Cemetery Drive", "Give 'Em Hell, Kid", "Hang 'Em High", "Helena"}) {
+		t.Fatalf("queued tracks = %#v", queued)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Helena", "Give 'Em Hell, Kid", "Hang 'Em High", "Cemetery Drive"}) {
+		t.Fatalf("album order = %v", got)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if m.trackList.FilterValue() != "t" {
+		t.Fatalf("filter value = %q, want t", m.trackList.FilterValue())
+	}
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Helena", "Give 'Em Hell, Kid", "Hang 'Em High", "Cemetery Drive"}) {
+		t.Fatalf("tracks changed while filtering = %v", got)
+	}
+}
+
+func TestLibraryModel_RestoresSourceOrderForUnnumberedTracks(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "second", Name: "Second"},
+		{ID: "first", Name: "First"},
+		{ID: "third", Name: "Third"},
+	}})
+
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Second", "First", "Third"}) {
+		t.Fatalf("source order = %v", got)
+	}
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"First", "Second", "Third"}) {
+		t.Fatalf("title order = %v", got)
+	}
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Second", "First", "Third"}) {
+		t.Fatalf("restored source order = %v", got)
+	}
+}
+
+func TestLibraryModel_SelectsFirstTrackWhenOpeningShorterAlbum(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	longAlbumTracks := make([]jellyfin.Track, 30)
+	for i := range longAlbumTracks {
+		longAlbumTracks[i] = jellyfin.Track{ID: fmt.Sprintf("long-%d", i), Name: fmt.Sprintf("Track %d", i), IndexNumber: i + 1}
+	}
+	m, _ = m.Update(TracksLoadedMsg{Tracks: longAlbumTracks})
+	m.trackList.Select(29)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.SelectAlbum(jellyfin.Album{ID: "short", Name: "Short Album"})
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "short-1", Name: "First", IndexNumber: 1},
+		{ID: "short-2", Name: "Second", IndexNumber: 2},
+		{ID: "short-3", Name: "Third", IndexNumber: 3},
+		{ID: "short-4", Name: "Fourth", IndexNumber: 4},
+		{ID: "short-5", Name: "Fifth", IndexNumber: 5},
+	}})
+
+	selected, ok := m.SelectedTrack()
+	if !ok || selected.ID != "short-1" {
+		t.Fatalf("selected track = %+v, %v; want first track", selected, ok)
+	}
+}
+
+func TestLibraryModel_IgnoresStaleAlbumTracks(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{{ID: "old", Name: "Old"}}})
+	m.SelectAlbum(jellyfin.Album{ID: "album-a", Name: "Album A"})
+	m.SelectAlbum(jellyfin.Album{ID: "album-b", Name: "Album B"})
+
+	if len(m.Tracks()) != 0 {
+		t.Fatalf("tracks while loading = %v, want none", trackNames(m.Tracks()))
+	}
+	m, _ = m.Update(TracksLoadedMsg{
+		AlbumID: "album-a",
+		Tracks:  []jellyfin.Track{{ID: "a-1", Name: "Album A track"}},
+	})
+	if !m.loading || len(m.Tracks()) != 0 {
+		t.Fatalf("stale result changed model: loading=%v tracks=%v", m.loading, trackNames(m.Tracks()))
+	}
+
+	m, _ = m.Update(TracksLoadedMsg{
+		AlbumID: "album-b",
+		Tracks:  []jellyfin.Track{{ID: "b-1", Name: "Album B track"}},
+	})
+	if m.loading || !slices.Equal(trackNames(m.Tracks()), []string{"Album B track"}) {
+		t.Fatalf("current result not loaded: loading=%v tracks=%v", m.loading, trackNames(m.Tracks()))
 	}
 }
 

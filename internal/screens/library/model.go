@@ -27,6 +27,13 @@ const (
 	LevelTracks
 )
 
+type TrackSort int
+
+const (
+	TrackSortAlbum TrackSort = iota
+	TrackSortTitle
+)
+
 type Model struct {
 	client     *jellyfin.Client
 	libraryID  string
@@ -42,7 +49,9 @@ type Model struct {
 	selectedAlbum  jellyfin.Album
 	artists        []jellyfin.Artist
 	albums         []jellyfin.Album
+	trackSource    []jellyfin.Track
 	tracks         []jellyfin.Track
+	trackSort      TrackSort
 	allTracks      []jellyfin.Track
 	allTracksErr   error
 
@@ -58,7 +67,7 @@ func New(styles ui.Styles) Model {
 	del.Styles.SelectedTitle = del.Styles.SelectedTitle.Foreground(styles.Accent.GetForeground()).BorderForeground(styles.Accent.GetForeground())
 	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
 
-	initList := func(title string) list.Model {
+	initList := func(title string, includeSortKey bool) list.Model {
 		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
@@ -69,21 +78,25 @@ func New(styles ui.Styles) Model {
 		l.SetShowStatusBar(true)
 		l.SetFilteringEnabled(true)
 		l.AdditionalFullHelpKeys = func() []key.Binding {
-			return []key.Binding{
+			bindings := []key.Binding{
 				key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc", "back")),
 				key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add track to queue")),
 				key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add album to queue")),
 				key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "add album shuffled")),
 			}
+			if includeSortKey {
+				bindings = append(bindings, key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "toggle sort")))
+			}
+			return bindings
 		}
 		return l
 	}
 
 	return Model{
 		level:      LevelAlbums,
-		artistList: initList("Artists"),
-		albumList:  initList("Albums"),
-		trackList:  initList("Tracks"),
+		artistList: initList("Artists", false),
+		albumList:  initList("Albums", false),
+		trackList:  initList("Tracks", true),
 		styles:     styles,
 		loading:    true,
 	}
@@ -170,7 +183,7 @@ func (m Model) fetchTracksCmd(albumID string) tea.Cmd {
 	return func() tea.Msg {
 		logger.Info("fetching tracks", "albumID", albumID)
 		tracks, err := client.GetTracks(context.Background(), albumID)
-		return TracksLoadedMsg{Tracks: tracks, Err: err}
+		return TracksLoadedMsg{AlbumID: albumID, Tracks: tracks, Err: err}
 	}
 }
 
@@ -260,17 +273,15 @@ func (m *Model) PatchTrack(id, name string, artists []string, album string) {
 			t.Album = album
 		}
 	}
-	for i := range m.tracks {
-		if m.tracks[i].ID == id {
-			patch(&m.tracks[i])
-			items := m.trackList.Items()
-			for j, item := range items {
-				if ti, ok := item.(trackItem); ok && ti.Track.ID == id {
-					patch(&ti.Track)
-					items[j] = ti
-				}
-			}
-			m.trackList.SetItems(items)
+	selectedID := ""
+	if selected, ok := m.trackList.SelectedItem().(trackItem); ok {
+		selectedID = selected.Track.ID
+	}
+	for i := range m.trackSource {
+		if m.trackSource[i].ID == id {
+			patch(&m.trackSource[i])
+			m.rebuildTrackList(selectedID)
+			break
 		}
 	}
 	for i := range m.allTracks {
@@ -309,17 +320,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case TracksLoadedMsg:
+		if msg.AlbumID != "" && msg.AlbumID != m.selectedAlbum.ID {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
-			m.tracks = append([]jellyfin.Track(nil), msg.Tracks...)
-			jellyfin.SortAlbumTracks(m.tracks)
-			items := make([]list.Item, len(m.tracks))
-			for i, t := range m.tracks {
-				items[i] = trackItem{Track: t}
-			}
-			m.trackList.Title = fmt.Sprintf("Tracks — %s", m.selectedAlbum.Name)
-			cmd := m.trackList.SetItems(items)
+			m.trackSource = append([]jellyfin.Track(nil), msg.Tracks...)
+			cmd := m.rebuildTrackList("")
 			m.level = LevelTracks
 			return m, cmd
 		}
@@ -373,6 +381,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.allTracksErr != nil {
 				m.allTracksErr = nil
 				return m, m.FetchAllTracksCmd()
+			}
+		case "t":
+			if m.level == LevelTracks {
+				selectedID := ""
+				if selected, ok := m.trackList.SelectedItem().(trackItem); ok {
+					selectedID = selected.Track.ID
+				}
+				m.trackSort = (m.trackSort + 1) % 2
+				return m, m.rebuildTrackList(selectedID)
 			}
 		case "esc", "left":
 			if m.HasActiveFilter() {
@@ -460,6 +477,42 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) rebuildTrackList(selectedID string) tea.Cmd {
+	m.tracks = append(m.tracks[:0], m.trackSource...)
+	switch m.trackSort {
+	case TrackSortTitle:
+		slices.SortStableFunc(m.tracks, func(a, b jellyfin.Track) int {
+			return libraryCollator.CompareString(a.Name, b.Name)
+		})
+	default:
+		jellyfin.SortAlbumTracks(m.tracks)
+	}
+
+	items := make([]list.Item, len(m.tracks))
+	for i, track := range m.tracks {
+		items[i] = trackItem{Track: track}
+	}
+	m.trackList.Title = fmt.Sprintf("Tracks — %s [%s]", m.selectedAlbum.Name, m.trackSort)
+	cmd := m.trackList.SetItems(items)
+	if selectedID == "" {
+		m.trackList.ResetSelected()
+	}
+	for i, track := range m.tracks {
+		if track.ID == selectedID {
+			m.trackList.Select(i)
+			break
+		}
+	}
+	return cmd
+}
+
+func (s TrackSort) String() string {
+	if s == TrackSortTitle {
+		return "title"
+	}
+	return "album"
+}
+
 func (m *Model) activeList() *list.Model {
 	switch m.level {
 	case LevelTracks:
@@ -527,6 +580,8 @@ func (m *Model) SelectAlbum(album jellyfin.Album) tea.Cmd {
 	m.selectedAlbum = album
 	m.loading = true
 	m.level = LevelTracks
+	m.trackSource = nil
+	m.tracks = nil
 	m.trackList.Title = fmt.Sprintf("Tracks — %s", album.Name)
 	m.trackList.SetItems(components.BuildSkeletonRows(m.styles))
 	return m.fetchTracksCmd(album.ID)

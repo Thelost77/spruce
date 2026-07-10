@@ -26,8 +26,9 @@ type AlbumsLoadedMsg struct {
 
 // TracksLoadedMsg is received when tracks are loaded for an album.
 type TracksLoadedMsg struct {
-	Tracks []jellyfin.Track
-	Err    error
+	AlbumID string
+	Tracks  []jellyfin.Track
+	Err     error
 }
 
 // AllTracksLoadedMsg is received when all tracks in the library are loaded.

@@ -124,6 +124,7 @@ func (m *Model) viewHints() string {
 				key("a", "add track"),
 				key("A", "add album"),
 				key("S", "shuffle album"),
+				key("t", "sort"),
 				key("m", "edit meta"),
 				key("/", "search"),
 				key("esc", "back"),
