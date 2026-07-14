@@ -252,6 +252,8 @@ func TestLoadKeybinds(t *testing.T) {
 [keybinds]
 quit = "ctrl+c"
 play_pause = "space"
+next_track = "ctrl+n"
+prev_track = "ctrl+p"
 `
 	if err := os.WriteFile(path, []byte(toml), 0644); err != nil {
 		t.Fatalf("failed to write test config: %v", err)
@@ -267,6 +269,12 @@ play_pause = "space"
 	}
 	if cfg.Keybinds.PlayPause != "space" {
 		t.Errorf("expected play_pause keybind 'space', got %q", cfg.Keybinds.PlayPause)
+	}
+	if cfg.Keybinds.NextTrack != "ctrl+n" {
+		t.Errorf("expected next_track keybind 'ctrl+n', got %q", cfg.Keybinds.NextTrack)
+	}
+	if cfg.Keybinds.PrevTrack != "ctrl+p" {
+		t.Errorf("expected prev_track keybind 'ctrl+p', got %q", cfg.Keybinds.PrevTrack)
 	}
 }
 
@@ -287,5 +295,45 @@ func TestDefaultKeybinds(t *testing.T) {
 	}
 	if cfg.Keybinds.SeekBackward != "h" {
 		t.Errorf("expected default seek_backward 'h', got %q", cfg.Keybinds.SeekBackward)
+	}
+	if cfg.Keybinds.NextTrack != "n" {
+		t.Errorf("expected default next_track 'n', got %q", cfg.Keybinds.NextTrack)
+	}
+	if cfg.Keybinds.PrevTrack != "N" {
+		t.Errorf("expected default prev_track 'N', got %q", cfg.Keybinds.PrevTrack)
+	}
+}
+
+func TestLoadMigratesLegacyTrackKeybinds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	contents := `[keybinds]
+next_chapter = "ctrl+n"
+prev_chapter = "ctrl+p"
+next_in_queue = ">"
+`
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Keybinds.NextTrack != "ctrl+n" || cfg.Keybinds.PrevTrack != "ctrl+p" {
+		t.Fatalf("legacy bindings not preserved: %+v", cfg.Keybinds)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `next_track = "ctrl+n"`) || !strings.Contains(text, `prev_track = "ctrl+p"`) {
+		t.Fatalf("migrated bindings not persisted:\n%s", text)
+	}
+	for _, stale := range []string{"next_chapter", "prev_chapter", "next_in_queue"} {
+		if strings.Contains(text, stale) {
+			t.Fatalf("stale key %q still persisted:\n%s", stale, text)
+		}
 	}
 }

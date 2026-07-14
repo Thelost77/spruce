@@ -1,4 +1,4 @@
-# Theme Configuration
+# Theme configuration
 
 Spruce keeps theme support as editable color values in `config.toml`.
 

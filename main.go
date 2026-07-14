@@ -1,11 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/Thelost77/spruce/internal/app"
+	"github.com/Thelost77/spruce/internal/buildinfo"
 	"github.com/Thelost77/spruce/internal/config"
 	"github.com/Thelost77/spruce/internal/logger"
 	"github.com/Thelost77/spruce/internal/player"
@@ -13,6 +15,17 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage: spruce [--version]")
+		flag.PrintDefaults()
+	}
+	showVersion := flag.Bool("version", false, "Print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("spruce %s\n", buildinfo.Current())
+		return
+	}
+
 	closeLog := logger.Init()
 	defer closeLog()
 	logger.Info("starting spruce TUI")

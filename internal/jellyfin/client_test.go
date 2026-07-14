@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Thelost77/spruce/internal/buildinfo"
 )
 
 func TestClient_Login(t *testing.T) {
@@ -37,6 +39,9 @@ func TestClient_Login(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "", "", "Manual device", "manual-id")
+	if got := client.authHeader(); !strings.Contains(got, `Version="`+buildinfo.Current()+`"`) {
+		t.Fatalf("authorization header has wrong client version: %q", got)
+	}
 	res, err := client.Login(context.Background(), "alice", "secret")
 	if err != nil {
 		t.Fatalf("Login error: %v", err)

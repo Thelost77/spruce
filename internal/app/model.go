@@ -98,9 +98,6 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 		if cfg.Keybinds.SeekBackward != "" {
 			actualCfg.Keybinds.SeekBackward = cfg.Keybinds.SeekBackward
 		}
-		if cfg.Keybinds.NextInQueue != "" {
-			actualCfg.Keybinds.NextInQueue = cfg.Keybinds.NextInQueue
-		}
 		if cfg.Keybinds.SpeedUp != "" {
 			actualCfg.Keybinds.SpeedUp = cfg.Keybinds.SpeedUp
 		}
@@ -113,11 +110,11 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 		if cfg.Keybinds.VolumeDown != "" {
 			actualCfg.Keybinds.VolumeDown = cfg.Keybinds.VolumeDown
 		}
-		if cfg.Keybinds.NextChapter != "" {
-			actualCfg.Keybinds.NextChapter = cfg.Keybinds.NextChapter
+		if cfg.Keybinds.NextTrack != "" {
+			actualCfg.Keybinds.NextTrack = cfg.Keybinds.NextTrack
 		}
-		if cfg.Keybinds.PrevChapter != "" {
-			actualCfg.Keybinds.PrevChapter = cfg.Keybinds.PrevChapter
+		if cfg.Keybinds.PrevTrack != "" {
+			actualCfg.Keybinds.PrevTrack = cfg.Keybinds.PrevTrack
 		}
 		if cfg.Keybinds.SleepTimer != "" {
 			actualCfg.Keybinds.SleepTimer = cfg.Keybinds.SleepTimer

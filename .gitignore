@@ -7,4 +7,4 @@ spruce
 *.db
 .beads-credential-key
 .test_cfg/
-
+/artifacts/

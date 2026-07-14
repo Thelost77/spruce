@@ -29,8 +29,8 @@ const (
 	ActionGoPlaylists
 	ActionGoSeriesList
 	ActionTogglePlay
-	ActionNextChapter
-	ActionPrevChapter
+	ActionNextTrack
+	ActionPrevTrack
 	ActionSeekForward
 	ActionSeekBackward
 	ActionSpeedUp

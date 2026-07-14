@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Thelost77/spruce/internal/buildinfo"
 	"github.com/Thelost77/spruce/internal/logger"
 )
 
@@ -44,6 +45,7 @@ type Client struct {
 	userID     string
 	deviceName string
 	deviceID   string
+	version    string
 	httpClient *http.Client
 }
 
@@ -55,6 +57,7 @@ func NewClient(baseURL, token, userID, deviceName, deviceID string) *Client {
 		userID:     userID,
 		deviceName: deviceName,
 		deviceID:   deviceID,
+		version:    buildinfo.Current(),
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -84,7 +87,7 @@ func (c *Client) SetAuth(token, userID string) {
 
 // authHeader constructs the MediaBrowser Authorization header string.
 func (c *Client) authHeader() string {
-	header := `MediaBrowser Client="spruce", Device="` + c.deviceName + `", DeviceId="` + c.deviceID + `", Version="1.0.0"`
+	header := `MediaBrowser Client="spruce", Device="` + c.deviceName + `", DeviceId="` + c.deviceID + `", Version="` + c.version + `"`
 	if c.token != "" {
 		header += `, Token="` + c.token + `"`
 	}

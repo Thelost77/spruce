@@ -29,13 +29,13 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 	if back == "" {
 		back = def.Back
 	}
-	next := cfg.NextChapter
+	next := cfg.NextTrack
 	if next == "" {
-		next = def.NextChapter
+		next = def.NextTrack
 	}
-	prev := cfg.PrevChapter
+	prev := cfg.PrevTrack
 	if prev == "" {
-		prev = def.PrevChapter
+		prev = def.PrevTrack
 	}
 	sleep := cfg.SleepTimer
 	if sleep == "" {

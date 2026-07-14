@@ -36,8 +36,8 @@ func (m *Model) openCommandPalette() {
 			components.PaletteItem{Label: "Speed Down", Action: components.ActionSpeedDown},
 			components.PaletteItem{Label: "Volume Up", Action: components.ActionVolumeUp},
 			components.PaletteItem{Label: "Volume Down", Action: components.ActionVolumeDown},
-			components.PaletteItem{Label: "Next Track", Action: components.ActionNextChapter},
-			components.PaletteItem{Label: "Previous Track", Action: components.ActionPrevChapter},
+			components.PaletteItem{Label: "Next Track", Action: components.ActionNextTrack},
+			components.PaletteItem{Label: "Previous Track", Action: components.ActionPrevTrack},
 			components.PaletteItem{Label: "Sleep Timer", IsHeader: true},
 			components.PaletteItem{Label: "Sleep Timer: 15m", Action: components.ActionSleep15},
 			components.PaletteItem{Label: "Sleep Timer: 30m", Action: components.ActionSleep30},
@@ -244,12 +244,12 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 			return m, player.SetVolumeCmd(m.mpv, m.playerState.Volume)
 		}
 		return m, nil
-	case components.ActionNextChapter:
+	case components.ActionNextTrack:
 		if len(m.tracks) > 0 && m.currentIndex+1 < len(m.tracks) {
 			return m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
 		}
 		return m, nil
-	case components.ActionPrevChapter:
+	case components.ActionPrevTrack:
 		if m.playerState.Position > 3.0 {
 			if m.mpv != nil {
 				return m, player.SeekCmd(m.mpv, 0)

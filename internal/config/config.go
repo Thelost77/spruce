@@ -45,13 +45,12 @@ type KeybindsConfig struct {
 	PlayPause    string `toml:"play_pause"`
 	SeekForward  string `toml:"seek_forward"`
 	SeekBackward string `toml:"seek_backward"`
-	NextInQueue  string `toml:"next_in_queue"`
 	SpeedUp      string `toml:"speed_up"`
 	SpeedDown    string `toml:"speed_down"`
 	VolumeUp     string `toml:"volume_up"`
 	VolumeDown   string `toml:"volume_down"`
-	NextChapter  string `toml:"next_chapter"`
-	PrevChapter  string `toml:"prev_chapter"`
+	NextTrack    string `toml:"next_track"`
+	PrevTrack    string `toml:"prev_track"`
 	SleepTimer   string `toml:"sleep_timer"`
 	Back         string `toml:"back"`
 }
@@ -85,13 +84,12 @@ func Default() Config {
 			PlayPause:    " ",
 			SeekForward:  "l",
 			SeekBackward: "h",
-			NextInQueue:  ">",
 			SpeedUp:      "+",
 			SpeedDown:    "-",
 			VolumeUp:     "]",
 			VolumeDown:   "[",
-			NextChapter:  "n",
-			PrevChapter:  "N",
+			NextTrack:    "n",
+			PrevTrack:    "N",
 			SleepTimer:   "S",
 			Back:         "esc",
 		},
@@ -121,13 +119,19 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return Config{}, err
-	}
-	changed, err := ensureDevice(&cfg)
+	metadata, err := toml.Decode(string(data), &cfg)
 	if err != nil {
 		return Config{}, err
 	}
+	changed, err := migrateLegacyKeybinds(data, metadata, &cfg)
+	if err != nil {
+		return Config{}, err
+	}
+	deviceChanged, err := ensureDevice(&cfg)
+	if err != nil {
+		return Config{}, err
+	}
+	changed = changed || deviceChanged
 	if changed {
 		if err := Save(path, cfg); err != nil {
 			return Config{}, fmt.Errorf("persist device identity migration: %w", err)
@@ -135,6 +139,32 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func migrateLegacyKeybinds(data []byte, metadata toml.MetaData, cfg *Config) (bool, error) {
+	hasLegacyNext := metadata.IsDefined("keybinds", "next_chapter")
+	hasLegacyPrev := metadata.IsDefined("keybinds", "prev_chapter")
+	hasDeadNext := metadata.IsDefined("keybinds", "next_in_queue")
+	if !hasLegacyNext && !hasLegacyPrev && !hasDeadNext {
+		return false, nil
+	}
+
+	var legacy struct {
+		Keybinds struct {
+			NextTrack string `toml:"next_chapter"`
+			PrevTrack string `toml:"prev_chapter"`
+		} `toml:"keybinds"`
+	}
+	if err := toml.Unmarshal(data, &legacy); err != nil {
+		return false, fmt.Errorf("decode legacy keybinds: %w", err)
+	}
+	if hasLegacyNext && !metadata.IsDefined("keybinds", "next_track") && legacy.Keybinds.NextTrack != "" {
+		cfg.Keybinds.NextTrack = legacy.Keybinds.NextTrack
+	}
+	if hasLegacyPrev && !metadata.IsDefined("keybinds", "prev_track") && legacy.Keybinds.PrevTrack != "" {
+		cfg.Keybinds.PrevTrack = legacy.Keybinds.PrevTrack
+	}
+	return true, nil
 }
 
 func ensureDevice(cfg *Config) (bool, error) {
