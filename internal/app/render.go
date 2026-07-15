@@ -111,6 +111,7 @@ func (m *Model) viewHints() string {
 		if m.libraryScreen.CurrentLevel() == library.LevelAlbums {
 			parts = append(parts,
 				key("enter", "open"),
+				key("f", "favorite"),
 				key("a/A", "queue album"),
 				key("S", "shuffle album"),
 				key("m", "edit meta"),
@@ -121,6 +122,7 @@ func (m *Model) viewHints() string {
 		} else {
 			parts = append(parts,
 				key("enter", "play"),
+				key("f", "favorite"),
 				key("a", "add track"),
 				key("A", "add album"),
 				key("S", "shuffle album"),
@@ -144,6 +146,7 @@ func (m *Model) viewHints() string {
 		} else {
 			parts = append(parts,
 				key("enter", "play"),
+				key("f", "favorite"),
 				key("a", "add track"),
 				key("A", "add playlist"),
 				key("S", "shuffle playlist"),
@@ -190,9 +193,12 @@ func (m *Model) viewHints() string {
 		parts = append(parts, key("?", "help"), key("q", "quit"))
 	}
 
-	maxW := m.width
+	style := m.styles.StatusBar
+	maxW := normalizeViewWidth(m.width)
 	if maxW <= 0 {
 		maxW = 1000
+	} else {
+		maxW = max(1, maxW-style.GetHorizontalPadding())
 	}
 	var finalParts []string
 	for _, p := range parts {
@@ -204,10 +210,9 @@ func (m *Model) viewHints() string {
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Center, joinWith(finalParts, sep)...)
-	style := m.styles.StatusBar
 	if m.width > 0 {
-		style = style.Width(m.width)
-		content = ansi.Truncate(content, m.width, "")
+		style = style.Width(maxW)
+		content = ansi.Truncate(content, maxW, "")
 	}
 	return style.Render(content)
 }

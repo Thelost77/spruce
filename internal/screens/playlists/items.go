@@ -25,10 +25,14 @@ type trackItem struct {
 }
 
 func (i trackItem) Title() string {
-	if i.Track.IndexNumber > 0 {
-		return fmt.Sprintf("%d. %s", i.Track.IndexNumber, i.Track.Name)
+	prefix := ""
+	if i.Track.UserData.IsFavorite {
+		prefix = "♥ "
 	}
-	return i.Track.Name
+	if i.Track.IndexNumber > 0 {
+		return fmt.Sprintf("%s%d. %s", prefix, i.Track.IndexNumber, i.Track.Name)
+	}
+	return prefix + i.Track.Name
 }
 func (i trackItem) Description() string {
 	return fmt.Sprintf("%s • %s", i.Track.DisplayArtist(), ui.FormatDuration(i.Track.Duration()))

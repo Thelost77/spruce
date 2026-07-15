@@ -1,6 +1,9 @@
 package library
 
-import "github.com/Thelost77/spruce/internal/jellyfin"
+import (
+	"github.com/Thelost77/spruce/internal/jellyfin"
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // PlayTracksMsg signals to the parent app that playback of tracks should begin.
 type PlayTracksMsg struct {
@@ -35,6 +38,25 @@ type TracksLoadedMsg struct {
 type AllTracksLoadedMsg struct {
 	Tracks []jellyfin.Track
 	Err    error
+}
+
+// FavoriteChangedMsg reports the server-confirmed favorite state for a track.
+type FavoriteChangedMsg struct {
+	TrackID    string
+	IsFavorite bool
+	Err        error
+}
+
+// AlbumFavoriteChangedMsg reports the server-confirmed favorite state for an album.
+type AlbumFavoriteChangedMsg struct {
+	AlbumID    string
+	IsFavorite bool
+	Err        error
+}
+
+// RefilterMsg routes an asynchronous list refilter back to the library model.
+type RefilterMsg struct {
+	Msg tea.Msg
 }
 
 // EditMetadataMsg requests opening the metadata editor for a track or album.

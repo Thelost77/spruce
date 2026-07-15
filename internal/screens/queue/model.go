@@ -33,7 +33,7 @@ func New(styles ui.Styles) Model {
 	l := list.New(nil, del, 0, 0)
 	l.KeyMap.Quit.SetKeys("q")
 	l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
-	l.KeyMap.NextPage.SetKeys("pgdown", "f")
+	l.KeyMap.NextPage.SetKeys("pgdown")
 	l.Title = "Queue / Now Playing"
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)

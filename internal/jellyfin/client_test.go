@@ -87,6 +87,12 @@ func TestClient_GetArtistsAlbumsTracks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parentID := r.URL.Query().Get("ParentId")
 		itemTypes := r.URL.Query().Get("IncludeItemTypes")
+		if itemTypes == "Audio" && r.URL.Query().Get("EnableUserData") != "true" {
+			t.Fatalf("EnableUserData = %q, want true", r.URL.Query().Get("EnableUserData"))
+		}
+		if itemTypes == "MusicAlbum" && r.URL.Query().Get("EnableUserData") != "true" {
+			t.Fatalf("EnableUserData = %q, want true", r.URL.Query().Get("EnableUserData"))
+		}
 
 		switch {
 		case itemTypes == "MusicArtist,Artist" && parentID == "lib-1":
@@ -161,6 +167,9 @@ func TestClient_GetPlaylists(t *testing.T) {
 			if r.URL.Query().Get("userId") != "user-123" {
 				t.Fatalf("userId = %q, want user-123", r.URL.Query().Get("userId"))
 			}
+			if r.URL.Query().Get("enableUserData") != "true" {
+				t.Fatalf("enableUserData = %q, want true", r.URL.Query().Get("enableUserData"))
+			}
 			_ = json.NewEncoder(w).Encode(itemsResponse[Track]{
 				Items:            []Track{{ID: "trk-1", Name: "One"}, {ID: "trk-2", Name: "Two"}},
 				TotalRecordCount: 2,
@@ -186,6 +195,43 @@ func TestClient_GetPlaylists(t *testing.T) {
 	}
 	if len(tracks) != 2 || tracks[1].Name != "Two" {
 		t.Fatalf("unexpected playlist tracks: %+v", tracks)
+	}
+}
+
+func TestClient_SetFavorite(t *testing.T) {
+	tests := []struct {
+		name     string
+		favorite bool
+		method   string
+	}{
+		{name: "mark", favorite: true, method: http.MethodPost},
+		{name: "unmark", favorite: false, method: http.MethodDelete},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != tt.method {
+					t.Fatalf("method = %q, want %q", r.Method, tt.method)
+				}
+				if r.URL.EscapedPath() != "/UserFavoriteItems/track%2F1" {
+					t.Fatalf("path = %q, want escaped item path", r.URL.EscapedPath())
+				}
+				if r.URL.Query().Get("userId") != "user-123" {
+					t.Fatalf("userId = %q, want user-123", r.URL.Query().Get("userId"))
+				}
+				_ = json.NewEncoder(w).Encode(UserItemData{IsFavorite: tt.favorite})
+			}))
+			defer server.Close()
+
+			client := NewClient(server.URL, "token-xyz", "user-123", "Test device", "test-device")
+			got, err := client.SetFavorite(context.Background(), "track/1", tt.favorite)
+			if err != nil {
+				t.Fatalf("SetFavorite error: %v", err)
+			}
+			if got.IsFavorite != tt.favorite {
+				t.Fatalf("IsFavorite = %v, want %v", got.IsFavorite, tt.favorite)
+			}
+		})
 	}
 }
 

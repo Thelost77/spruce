@@ -71,7 +71,7 @@ func New(styles ui.Styles) Model {
 		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
-		l.KeyMap.NextPage.SetKeys("pgdown", "f")
+		l.KeyMap.NextPage.SetKeys("pgdown")
 		l.Title = title
 		l.SetShowTitle(false)
 		l.SetShowHelp(false)
@@ -293,27 +293,15 @@ func (m *Model) PatchTrack(id, name string, artists []string, album string) {
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case RefilterMsg:
+		return m.Update(msg.Msg)
+
 	case AlbumsLoadedMsg:
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
 			m.albums = append([]jellyfin.Album(nil), msg.Albums...)
-			slices.SortFunc(m.albums, func(a, b jellyfin.Album) int {
-				c := libraryCollator.CompareString(a.Name, b.Name)
-				if c != 0 {
-					return c
-				}
-				if a.ProductionYear != b.ProductionYear {
-					return a.ProductionYear - b.ProductionYear
-				}
-				return strings.Compare(a.ID, b.ID)
-			})
-			items := make([]list.Item, len(m.albums))
-			for i, a := range m.albums {
-				items[i] = albumItem{Album: a}
-			}
-			m.albumList.Title = "Albums"
-			cmd := m.albumList.SetItems(items)
+			cmd := m.rebuildAlbumList("")
 			m.level = LevelAlbums
 			return m, cmd
 		}
@@ -390,6 +378,29 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				m.trackSort = (m.trackSort + 1) % 2
 				return m, m.rebuildTrackList(selectedID)
+			}
+		case "f":
+			if m.client != nil {
+				switch m.level {
+				case LevelAlbums:
+					if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
+						client := m.client
+						album := sel.Album
+						return m, func() tea.Msg {
+							userData, err := client.SetFavorite(context.Background(), album.ID, !album.UserData.IsFavorite)
+							return AlbumFavoriteChangedMsg{AlbumID: album.ID, IsFavorite: userData.IsFavorite, Err: err}
+						}
+					}
+				case LevelTracks:
+					if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
+						client := m.client
+						track := sel.Track
+						return m, func() tea.Msg {
+							userData, err := client.SetFavorite(context.Background(), track.ID, !track.UserData.IsFavorite)
+							return FavoriteChangedMsg{TrackID: track.ID, IsFavorite: userData.IsFavorite, Err: err}
+						}
+					}
+				}
 			}
 		case "esc", "left":
 			if m.HasActiveFilter() {
@@ -477,6 +488,41 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) rebuildAlbumList(selectedID string) tea.Cmd {
+	slices.SortFunc(m.albums, func(a, b jellyfin.Album) int {
+		if a.UserData.IsFavorite != b.UserData.IsFavorite {
+			if a.UserData.IsFavorite {
+				return -1
+			}
+			return 1
+		}
+		c := libraryCollator.CompareString(a.Name, b.Name)
+		if c != 0 {
+			return c
+		}
+		if a.ProductionYear != b.ProductionYear {
+			return a.ProductionYear - b.ProductionYear
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	items := make([]list.Item, len(m.albums))
+	for i, album := range m.albums {
+		items[i] = albumItem{Album: album}
+	}
+	m.albumList.Title = "Albums"
+	cmd := m.albumList.SetItems(items)
+	if selectedID == "" {
+		m.albumList.ResetSelected()
+	}
+	for i, album := range m.albums {
+		if album.ID == selectedID {
+			m.albumList.Select(i)
+			break
+		}
+	}
+	return cmd
+}
+
 func (m *Model) rebuildTrackList(selectedID string) tea.Cmd {
 	m.tracks = append(m.tracks[:0], m.trackSource...)
 	switch m.trackSort {
@@ -487,6 +533,7 @@ func (m *Model) rebuildTrackList(selectedID string) tea.Cmd {
 	default:
 		jellyfin.SortAlbumTracks(m.tracks)
 	}
+	jellyfin.SortFavoritesFirst(m.tracks)
 
 	items := make([]list.Item, len(m.tracks))
 	for i, track := range m.tracks {
@@ -566,6 +613,51 @@ func (m Model) AllTracks() []jellyfin.Track {
 
 func (m *Model) SetAllTracks(tracks []jellyfin.Track) {
 	m.allTracks = tracks
+}
+
+// PatchTrackFavorite updates favorite state in all library track caches.
+func (m *Model) PatchTrackFavorite(id string, favorite bool) tea.Cmd {
+	selectedID := ""
+	if selected, ok := m.trackList.SelectedItem().(trackItem); ok {
+		selectedID = selected.Track.ID
+	}
+	for i := range m.trackSource {
+		if m.trackSource[i].ID == id {
+			m.trackSource[i].UserData.IsFavorite = favorite
+		}
+	}
+	for i := range m.allTracks {
+		if m.allTracks[i].ID == id {
+			m.allTracks[i].UserData.IsFavorite = favorite
+		}
+	}
+	return libraryRefilterCmd(m.rebuildTrackList(selectedID))
+}
+
+// PatchAlbumFavorite updates favorite state and rebuilds the album list.
+func (m *Model) PatchAlbumFavorite(id string, favorite bool) tea.Cmd {
+	selectedID := ""
+	if selected, ok := m.albumList.SelectedItem().(albumItem); ok {
+		selectedID = selected.Album.ID
+	}
+	for i := range m.albums {
+		if m.albums[i].ID == id {
+			m.albums[i].UserData.IsFavorite = favorite
+		}
+	}
+	if m.selectedAlbum.ID == id {
+		m.selectedAlbum.UserData.IsFavorite = favorite
+	}
+	return libraryRefilterCmd(m.rebuildAlbumList(selectedID))
+}
+
+func libraryRefilterCmd(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return RefilterMsg{Msg: cmd()}
+	}
 }
 
 func (m Model) IsFiltering() bool {

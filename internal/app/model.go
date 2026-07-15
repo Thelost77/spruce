@@ -527,6 +527,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case library.FavoriteChangedMsg:
+		if msg.Err != nil {
+			if jellyfin.IsHTTPStatus(msg.Err, 401) {
+				return m.handleAuthReset(msg.Err)
+			}
+			return m, m.err.SetError(msg.Err)
+		}
+		for i := range m.tracks {
+			if m.tracks[i].ID == msg.TrackID {
+				m.tracks[i].UserData.IsFavorite = msg.IsFavorite
+			}
+		}
+		libraryCmd := m.libraryScreen.PatchTrackFavorite(msg.TrackID, msg.IsFavorite)
+		playlistsCmd := m.playlistsScreen.PatchTrackFavorite(msg.TrackID, msg.IsFavorite)
+		m.syncQueueScreen()
+		return m, tea.Batch(libraryCmd, playlistsCmd)
+
+	case library.AlbumFavoriteChangedMsg:
+		if msg.Err != nil {
+			if jellyfin.IsHTTPStatus(msg.Err, 401) {
+				return m.handleAuthReset(msg.Err)
+			}
+			return m, m.err.SetError(msg.Err)
+		}
+		return m, m.libraryScreen.PatchAlbumFavorite(msg.AlbumID, msg.IsFavorite)
+
+	case library.RefilterMsg:
+		var cmd tea.Cmd
+		m.libraryScreen, cmd = m.libraryScreen.Update(msg)
+		return m, cmd
+
+	case playlists.RefilterMsg:
+		var cmd tea.Cmd
+		m.playlistsScreen, cmd = m.playlistsScreen.Update(msg)
+		return m, cmd
+
 	case library.PlayTracksMsg:
 		logger.Info("received PlayTracksMsg", "count", len(msg.Tracks), "start", msg.StartIndex)
 		if len(msg.Tracks) > 0 {

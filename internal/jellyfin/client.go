@@ -274,6 +274,7 @@ func (c *Client) GetAlbums(ctx context.Context, artistID string) ([]Album, error
 	params.Set("SortOrder", "Ascending")
 	params.Set("IncludeItemTypes", "MusicAlbum")
 	params.Set("Recursive", "true")
+	params.Set("EnableUserData", "true")
 
 	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
 	items, err := fetchPaged[Album](c, ctx, basePath, params)
@@ -294,6 +295,7 @@ func (c *Client) GetAllAlbums(ctx context.Context, libraryID string) ([]Album, e
 	params.Set("SortOrder", "Ascending")
 	params.Set("IncludeItemTypes", "MusicAlbum")
 	params.Set("Recursive", "true")
+	params.Set("EnableUserData", "true")
 
 	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
 	items, err := fetchPaged[Album](c, ctx, basePath, params)
@@ -314,6 +316,7 @@ func (c *Client) GetTracks(ctx context.Context, albumID string) ([]Track, error)
 	params.Set("SortOrder", "Ascending")
 	params.Set("IncludeItemTypes", "Audio")
 	params.Set("Recursive", "true")
+	params.Set("EnableUserData", "true")
 
 	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
 	items, err := fetchPaged[Track](c, ctx, basePath, params)
@@ -331,6 +334,7 @@ func (c *Client) GetTrack(ctx context.Context, itemID string) (*Track, error) {
 	}
 	params := url.Values{}
 	params.Set("Ids", itemID)
+	params.Set("EnableUserData", "true")
 	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
 	items, err := fetchPaged[Track](c, ctx, basePath, params)
 	if err != nil {
@@ -353,6 +357,7 @@ func (c *Client) GetAllTracks(ctx context.Context, libraryID string) ([]Track, e
 	params.Set("SortOrder", "Ascending")
 	params.Set("IncludeItemTypes", "Audio")
 	params.Set("Recursive", "true")
+	params.Set("EnableUserData", "true")
 
 	basePath := fmt.Sprintf("/Users/%s/Items", url.PathEscape(c.userID))
 	items, err := fetchPaged[Track](c, ctx, basePath, params)
@@ -394,6 +399,7 @@ func (c *Client) GetPlaylistTracks(ctx context.Context, playlistID string) ([]Tr
 		q.Set("userId", c.userID)
 		q.Set("startIndex", strconv.Itoa(startIndex))
 		q.Set("limit", strconv.Itoa(pageLimit))
+		q.Set("enableUserData", "true")
 		path := fmt.Sprintf("/Playlists/%s/Items?%s", url.PathEscape(playlistID), q.Encode())
 		data, err := c.do(ctx, http.MethodGet, path, nil)
 		if err != nil {
@@ -420,6 +426,29 @@ func (c *Client) GetPlaylistTracks(ctx context.Context, playlistID string) ([]Tr
 		}
 	}
 	return acc, nil
+}
+
+// SetFavorite updates the current user's favorite state for an item.
+func (c *Client) SetFavorite(ctx context.Context, itemID string, favorite bool) (UserItemData, error) {
+	if c.userID == "" {
+		return UserItemData{}, errors.New("user ID not set")
+	}
+	q := url.Values{}
+	q.Set("userId", c.userID)
+	path := fmt.Sprintf("/UserFavoriteItems/%s?%s", url.PathEscape(itemID), q.Encode())
+	method := http.MethodDelete
+	if favorite {
+		method = http.MethodPost
+	}
+	data, err := c.do(ctx, method, path, nil)
+	if err != nil {
+		return UserItemData{}, fmt.Errorf("set favorite: %w", err)
+	}
+	var userData UserItemData
+	if err := json.Unmarshal(data, &userData); err != nil {
+		return UserItemData{}, fmt.Errorf("decode favorite response: %w", err)
+	}
+	return userData, nil
 }
 
 // ReportPlaybackStart reports to Jellyfin that playback has begun.

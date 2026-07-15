@@ -160,6 +160,49 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	}
 }
 
+func TestAppModel_FavoriteChangedUpdatesTrackCopies(t *testing.T) {
+	m := New(nil, nil)
+	tracks := []jellyfin.Track{{ID: "t-1", Name: "One"}, {ID: "t-2", Name: "Two"}}
+	m.tracks = append([]jellyfin.Track(nil), tracks...)
+	m.libraryScreen.SetAllTracks(append([]jellyfin.Track(nil), tracks...))
+	m.libraryScreen, _ = m.libraryScreen.Update(library.TracksLoadedMsg{Tracks: tracks})
+	m.playlistsScreen, _ = m.playlistsScreen.Update(playlists.PlaylistTracksLoadedMsg{Tracks: tracks})
+
+	newM, _ := m.Update(library.FavoriteChangedMsg{TrackID: "t-2", IsFavorite: true})
+	m = newM.(*Model)
+
+	if !m.tracks[1].UserData.IsFavorite {
+		t.Fatal("queue source favorite state was not updated")
+	}
+	if got := m.libraryScreen.Tracks(); len(got) != 2 || got[0].ID != "t-2" || !got[0].UserData.IsFavorite {
+		t.Fatalf("library tracks = %+v", got)
+	}
+	if got := m.libraryScreen.AllTracks(); !got[1].UserData.IsFavorite {
+		t.Fatalf("all-tracks cache = %+v", got)
+	}
+	if got := m.playlistsScreen.Tracks(); len(got) != 2 || got[0].ID != "t-2" || !got[0].UserData.IsFavorite {
+		t.Fatalf("playlist tracks = %+v", got)
+	}
+	if got := m.queueScreen.Tracks(); !got[1].UserData.IsFavorite {
+		t.Fatalf("queue screen tracks = %+v", got)
+	}
+}
+
+func TestAppModel_AlbumFavoriteChangedUpdatesLibrary(t *testing.T) {
+	m := New(nil, nil)
+	m.libraryScreen, _ = m.libraryScreen.Update(library.AlbumsLoadedMsg{Albums: []jellyfin.Album{
+		{ID: "a-1", Name: "Alpha"},
+		{ID: "b-1", Name: "Bravo"},
+	}})
+
+	newM, _ := m.Update(library.AlbumFavoriteChangedMsg{AlbumID: "b-1", IsFavorite: true})
+	m = newM.(*Model)
+	got := m.libraryScreen.Albums()
+	if len(got) != 2 || got[0].ID != "b-1" || !got[0].UserData.IsFavorite {
+		t.Fatalf("albums = %+v", got)
+	}
+}
+
 func TestMPRISPlayAndPauseSetExplicitPlaybackState(t *testing.T) {
 	m := New(nil, nil)
 	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/ui"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -270,6 +271,180 @@ func TestLibraryModel_TogglesAlbumTrackSort(t *testing.T) {
 	}
 	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Helena", "Give 'Em Hell, Kid", "Hang 'Em High", "Cemetery Drive"}) {
 		t.Fatalf("tracks changed while filtering = %v", got)
+	}
+}
+
+func TestLibraryModel_FavoritesStayFirstWithinActiveSort(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m.selectedAlbum = jellyfin.Album{Name: "Album"}
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "t-3", Name: "Charlie", IndexNumber: 3},
+		{ID: "t-1", Name: "Alpha", IndexNumber: 1},
+		{ID: "t-4", Name: "Delta", IndexNumber: 4, UserData: jellyfin.UserItemData{IsFavorite: true}},
+		{ID: "t-2", Name: "Bravo", IndexNumber: 2, UserData: jellyfin.UserItemData{IsFavorite: true}},
+	}})
+
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Bravo", "Delta", "Alpha", "Charlie"}) {
+		t.Fatalf("album order = %v", got)
+	}
+	first := m.trackList.Items()[0].(trackItem)
+	if first.Title() != "♥ 2. Bravo" {
+		t.Fatalf("favorite title = %q", first.Title())
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Bravo", "Delta", "Alpha", "Charlie"}) {
+		t.Fatalf("title order = %v", got)
+	}
+
+	m.PatchTrackFavorite("t-2", false)
+	if got := trackNames(m.Tracks()); !slices.Equal(got, []string{"Delta", "Alpha", "Bravo", "Charlie"}) {
+		t.Fatalf("order after unmark = %v", got)
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	queued := cmd().(AddTracksToQueueMsg)
+	if got := trackNames(queued.Tracks); !slices.Equal(got, []string{"Delta", "Alpha", "Bravo", "Charlie"}) {
+		t.Fatalf("queued order = %v", got)
+	}
+}
+
+func TestLibraryModel_FavoriteAlbumsStayFirst(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m, _ = m.Update(AlbumsLoadedMsg{Albums: []jellyfin.Album{
+		{ID: "z", Name: "Zulu", UserData: jellyfin.UserItemData{IsFavorite: true}},
+		{ID: "a", Name: "Alpha"},
+		{ID: "b", Name: "Bravo", UserData: jellyfin.UserItemData{IsFavorite: true}},
+		{ID: "c", Name: "Charlie"},
+	}})
+
+	if got := names(m.Albums()); !slices.Equal(got, []string{"Bravo", "Zulu", "Alpha", "Charlie"}) {
+		t.Fatalf("album order = %v", got)
+	}
+	first := m.albumList.Items()[0].(albumItem)
+	if first.Title() != "♥ Bravo" {
+		t.Fatalf("favorite title = %q", first.Title())
+	}
+
+	m.albumList.Select(0)
+	m.PatchAlbumFavorite("b", false)
+	if got := names(m.Albums()); !slices.Equal(got, []string{"Zulu", "Alpha", "Bravo", "Charlie"}) {
+		t.Fatalf("order after unmark = %v", got)
+	}
+	if selected, ok := m.SelectedAlbum(); !ok || selected.ID != "b" {
+		t.Fatalf("selected album = %+v, %v", selected, ok)
+	}
+}
+
+func TestLibraryModel_AlbumFavoriteKeyUsesJellyfin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/UserFavoriteItems/a-1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(jellyfin.UserItemData{IsFavorite: true})
+	}))
+	defer server.Close()
+
+	m := New(ui.DefaultStyles())
+	m.client = jellyfin.NewClient(server.URL, "tok", "usr", "Test device", "test-device")
+	m, _ = m.Update(AlbumsLoadedMsg{Albums: []jellyfin.Album{{ID: "a-1", Name: "Album"}}})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if cmd == nil {
+		t.Fatal("favorite key returned nil command")
+	}
+	msg, ok := cmd().(AlbumFavoriteChangedMsg)
+	if !ok || msg.Err != nil || msg.AlbumID != "a-1" || !msg.IsFavorite {
+		t.Fatalf("favorite message = %#v", msg)
+	}
+	if slices.Contains(m.albumList.KeyMap.NextPage.Keys(), "f") {
+		t.Fatal("f remains bound to next page")
+	}
+}
+
+func TestLibraryModel_AlbumFavoritePreservesActiveFilter(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m, _ = m.Update(AlbumsLoadedMsg{Albums: []jellyfin.Album{
+		{ID: "a-1", Name: "Alpha"},
+		{ID: "b-1", Name: "Bravo"},
+	}})
+	m = applyLibraryKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = applyLibraryKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Alpha")})
+	m = applyLibraryKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := len(m.albumList.VisibleItems()); got != 1 {
+		t.Fatalf("visible albums before favorite = %d, want 1", got)
+	}
+
+	m = applyLibraryCmd(m, m.PatchAlbumFavorite("a-1", true))
+	if got := len(m.albumList.VisibleItems()); got != 1 {
+		t.Fatalf("visible albums after favorite = %d, want 1", got)
+	}
+}
+
+func TestLibraryModel_TrackFavoritePreservesActiveFilter(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{
+		{ID: "a-1", Name: "Alpha"},
+		{ID: "b-1", Name: "Bravo"},
+	}})
+	m = applyLibraryKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = applyLibraryKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Alpha")})
+	m = applyLibraryKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := len(m.trackList.VisibleItems()); got != 1 {
+		t.Fatalf("visible tracks before favorite = %d, want 1", got)
+	}
+
+	m = applyLibraryCmd(m, m.PatchTrackFavorite("a-1", true))
+	if got := len(m.trackList.VisibleItems()); got != 1 {
+		t.Fatalf("visible tracks after favorite = %d, want 1", got)
+	}
+}
+
+func applyLibraryKey(m Model, key tea.KeyMsg) Model {
+	var cmd tea.Cmd
+	m, cmd = m.Update(key)
+	return applyLibraryCmd(m, cmd)
+}
+
+func applyLibraryCmd(m Model, cmd tea.Cmd) Model {
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case tea.BatchMsg:
+		for _, batchCmd := range msg {
+			m = applyLibraryCmd(m, batchCmd)
+		}
+	case list.FilterMatchesMsg:
+		m, _ = m.Update(msg)
+	case RefilterMsg:
+		var next tea.Cmd
+		m, next = m.Update(msg)
+		m = applyLibraryCmd(m, next)
+	}
+	return m
+}
+
+func TestLibraryModel_FavoriteKeyUsesJellyfin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/UserFavoriteItems/t-1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(jellyfin.UserItemData{IsFavorite: true})
+	}))
+	defer server.Close()
+
+	m := New(ui.DefaultStyles())
+	m.client = jellyfin.NewClient(server.URL, "tok", "usr", "Test device", "test-device")
+	m.selectedAlbum = jellyfin.Album{Name: "Album"}
+	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{{ID: "t-1", Name: "One"}}})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if cmd == nil {
+		t.Fatal("favorite key returned nil command")
+	}
+	msg, ok := cmd().(FavoriteChangedMsg)
+	if !ok || msg.Err != nil || msg.TrackID != "t-1" || !msg.IsFavorite {
+		t.Fatalf("favorite message = %#v", msg)
 	}
 }
 

@@ -22,7 +22,12 @@ type albumItem struct {
 	Album jellyfin.Album
 }
 
-func (i albumItem) Title() string { return i.Album.Name }
+func (i albumItem) Title() string {
+	if i.Album.UserData.IsFavorite {
+		return "♥ " + i.Album.Name
+	}
+	return i.Album.Name
+}
 func (i albumItem) Description() string {
 	year := ""
 	if i.Album.ProductionYear > 0 {
@@ -42,10 +47,14 @@ type trackItem struct {
 }
 
 func (i trackItem) Title() string {
-	if i.Track.IndexNumber > 0 {
-		return fmt.Sprintf("%d. %s", i.Track.IndexNumber, i.Track.Name)
+	prefix := ""
+	if i.Track.UserData.IsFavorite {
+		prefix = "♥ "
 	}
-	return i.Track.Name
+	if i.Track.IndexNumber > 0 {
+		return fmt.Sprintf("%s%d. %s", prefix, i.Track.IndexNumber, i.Track.Name)
+	}
+	return prefix + i.Track.Name
 }
 func (i trackItem) Description() string {
 	dur := ui.FormatDuration(i.Track.Duration())

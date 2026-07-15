@@ -38,10 +38,11 @@ type Artist struct {
 
 // Album represents a music album item.
 type Album struct {
-	ID             string   `json:"Id"`
-	Name           string   `json:"Name"`
-	ProductionYear int      `json:"ProductionYear,omitempty"`
-	Artists        []string `json:"Artists,omitempty"`
+	ID             string       `json:"Id"`
+	Name           string       `json:"Name"`
+	ProductionYear int          `json:"ProductionYear,omitempty"`
+	Artists        []string     `json:"Artists,omitempty"`
+	UserData       UserItemData `json:"UserData,omitempty"`
 }
 
 // Playlist represents a Jellyfin playlist item.
@@ -51,16 +52,22 @@ type Playlist struct {
 	Count int    `json:"ChildCount,omitempty"`
 }
 
+// UserItemData contains user-specific state returned with a Jellyfin item.
+type UserItemData struct {
+	IsFavorite bool `json:"IsFavorite"`
+}
+
 // Track represents a single audio track item.
 type Track struct {
-	ID                string   `json:"Id"`
-	Name              string   `json:"Name"`
-	RunTimeTicks      int64    `json:"RunTimeTicks,omitempty"` // 1 sec = 10,000,000 ticks
-	IndexNumber       int      `json:"IndexNumber,omitempty"`
-	ParentIndexNumber int      `json:"ParentIndexNumber,omitempty"` // Disc number
-	AlbumID           string   `json:"AlbumId,omitempty"`
-	Album             string   `json:"Album,omitempty"`
-	Artists           []string `json:"Artists,omitempty"`
+	ID                string       `json:"Id"`
+	Name              string       `json:"Name"`
+	RunTimeTicks      int64        `json:"RunTimeTicks,omitempty"` // 1 sec = 10,000,000 ticks
+	IndexNumber       int          `json:"IndexNumber,omitempty"`
+	ParentIndexNumber int          `json:"ParentIndexNumber,omitempty"` // Disc number
+	AlbumID           string       `json:"AlbumId,omitempty"`
+	Album             string       `json:"Album,omitempty"`
+	Artists           []string     `json:"Artists,omitempty"`
+	UserData          UserItemData `json:"UserData,omitempty"`
 }
 
 // SortAlbumTracks orders tracks by disc and track number while retaining source order for ties.
@@ -70,6 +77,19 @@ func SortAlbumTracks(tracks []Track) {
 			cmp.Compare(a.ParentIndexNumber, b.ParentIndexNumber),
 			cmp.Compare(a.IndexNumber, b.IndexNumber),
 		)
+	})
+}
+
+// SortFavoritesFirst stably groups favorite tracks before other tracks.
+func SortFavoritesFirst(tracks []Track) {
+	slices.SortStableFunc(tracks, func(a, b Track) int {
+		if a.UserData.IsFavorite == b.UserData.IsFavorite {
+			return 0
+		}
+		if a.UserData.IsFavorite {
+			return -1
+		}
+		return 1
 	})
 }
 

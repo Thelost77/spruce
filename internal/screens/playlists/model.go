@@ -37,6 +37,7 @@ type Model struct {
 
 	selectedPlaylist jellyfin.Playlist
 	playlists        []jellyfin.Playlist
+	trackSource      []jellyfin.Track
 	tracks           []jellyfin.Track
 
 	loading bool
@@ -55,7 +56,7 @@ func New(styles ui.Styles) Model {
 		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
-		l.KeyMap.NextPage.SetKeys("pgdown", "f")
+		l.KeyMap.NextPage.SetKeys("pgdown")
 		l.Title = title
 		l.SetShowTitle(false)
 		l.SetShowHelp(false)
@@ -134,6 +135,9 @@ func (m Model) fetchPlaylistTracksForQueueCmd(playlistID string, shuffled bool) 
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case RefilterMsg:
+		return m.Update(msg.Msg)
+
 	case PlaylistsLoadedMsg:
 		m.loading = false
 		m.err = msg.Err
@@ -160,13 +164,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
-			m.tracks = append([]jellyfin.Track(nil), msg.Tracks...)
-			items := make([]list.Item, len(m.tracks))
-			for i, t := range m.tracks {
-				items[i] = trackItem{Track: t}
-			}
-			m.trackList.Title = m.selectedPlaylist.Name
-			cmd := m.trackList.SetItems(items)
+			m.trackSource = append([]jellyfin.Track(nil), msg.Tracks...)
+			cmd := m.rebuildTrackList("")
 			m.level = LevelTracks
 			return m, cmd
 		}
@@ -199,6 +198,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					m.trackList.ResetFilter()
 					return m, func() tea.Msg {
 						return library.PlayTracksMsg{Tracks: []jellyfin.Track{track}, StartIndex: 0}
+					}
+				}
+			}
+		case "f":
+			if m.level == LevelTracks && m.client != nil {
+				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
+					client := m.client
+					track := sel.Track
+					return m, func() tea.Msg {
+						userData, err := client.SetFavorite(context.Background(), track.ID, !track.UserData.IsFavorite)
+						return library.FavoriteChangedMsg{TrackID: track.ID, IsFavorite: userData.IsFavorite, Err: err}
 					}
 				}
 			}
@@ -252,6 +262,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) rebuildTrackList(selectedID string) tea.Cmd {
+	m.tracks = append(m.tracks[:0], m.trackSource...)
+	jellyfin.SortFavoritesFirst(m.tracks)
+	items := make([]list.Item, len(m.tracks))
+	for i, track := range m.tracks {
+		items[i] = trackItem{Track: track}
+	}
+	m.trackList.Title = m.selectedPlaylist.Name
+	cmd := m.trackList.SetItems(items)
+	if selectedID == "" {
+		m.trackList.ResetSelected()
+	}
+	for i, track := range m.tracks {
+		if track.ID == selectedID {
+			m.trackList.Select(i)
+			break
+		}
+	}
+	return cmd
+}
+
 func (m *Model) activeList() *list.Model {
 	if m.level == LevelTracks {
 		return &m.trackList
@@ -279,6 +310,26 @@ func (m Model) Tracks() []jellyfin.Track {
 	return m.tracks
 }
 
+// PatchTrackFavorite updates favorite state and restores playlist-relative ordering.
+func (m *Model) PatchTrackFavorite(id string, favorite bool) tea.Cmd {
+	selectedID := ""
+	if selected, ok := m.trackList.SelectedItem().(trackItem); ok {
+		selectedID = selected.Track.ID
+	}
+	for i := range m.trackSource {
+		if m.trackSource[i].ID == id {
+			m.trackSource[i].UserData.IsFavorite = favorite
+		}
+	}
+	cmd := m.rebuildTrackList(selectedID)
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return RefilterMsg{Msg: cmd()}
+	}
+}
+
 func (m Model) SelectedPlaylist() (jellyfin.Playlist, bool) {
 	if sel, ok := m.playlistList.SelectedItem().(playlistItem); ok {
 		return sel.Playlist, true
@@ -297,6 +348,8 @@ func (m *Model) SelectPlaylist(playlist jellyfin.Playlist) tea.Cmd {
 	m.selectedPlaylist = playlist
 	m.loading = true
 	m.level = LevelTracks
+	m.trackSource = nil
+	m.tracks = nil
 	m.trackList.Title = fmt.Sprintf("Playlist Tracks — %s", playlist.Name)
 	m.trackList.SetItems(components.BuildSkeletonRows(m.styles))
 	return m.fetchPlaylistTracksCmd(playlist.ID)

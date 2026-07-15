@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
@@ -15,6 +16,9 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 	}
 
 	m := New(ui.DefaultStyles())
+	if slices.Contains(m.list.KeyMap.NextPage.Keys(), "f") {
+		t.Fatal("f remains bound to next page")
+	}
 	m.SetSize(80, 24)
 
 	// Test empty view
