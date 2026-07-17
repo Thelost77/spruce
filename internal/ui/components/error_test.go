@@ -2,6 +2,7 @@ package components
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -35,6 +36,20 @@ func TestSetErrorAndView(t *testing.T) {
 	}
 	if !contains(view, "⚠") {
 		t.Errorf("view should contain warning icon, got: %q", view)
+	}
+}
+
+func TestErrorBannerStaysSingleLine(t *testing.T) {
+	b := NewErrorBanner(defaultTestStyle())
+	b.SetWidth(20)
+	b.SetError(errors.New(strings.Repeat("connection failed ", 10)))
+
+	view := b.View()
+	if got := lipgloss.Height(view); got != 1 {
+		t.Fatalf("view height = %d, want 1: %q", got, view)
+	}
+	if got := lipgloss.Width(view); got > 20 {
+		t.Fatalf("view width = %d, want at most 20", got)
 	}
 }
 

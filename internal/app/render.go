@@ -194,25 +194,24 @@ func (m *Model) viewHints() string {
 	}
 
 	style := m.styles.StatusBar
-	maxW := normalizeViewWidth(m.width)
-	if maxW <= 0 {
-		maxW = 1000
-	} else {
-		maxW = max(1, maxW-style.GetHorizontalPadding())
+	barWidth := normalizeViewWidth(m.width)
+	contentWidth := 1000
+	if barWidth > 0 {
+		contentWidth = max(1, barWidth-style.GetHorizontalFrameSize())
 	}
 	var finalParts []string
 	for _, p := range parts {
 		testStr := lipgloss.JoinHorizontal(lipgloss.Center, joinWith(append(finalParts, p), sep)...)
-		if lipgloss.Width(testStr) > maxW {
+		if lipgloss.Width(testStr) > contentWidth {
 			break
 		}
 		finalParts = append(finalParts, p)
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Center, joinWith(finalParts, sep)...)
-	if m.width > 0 {
-		style = style.Width(maxW)
-		content = ansi.Truncate(content, maxW, "")
+	if barWidth > 0 {
+		content = ansi.Truncate(content, contentWidth, "")
+		style = style.Width(barWidth)
 	}
 	return style.Render(content)
 }

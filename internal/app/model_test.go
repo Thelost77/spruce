@@ -810,6 +810,38 @@ func TestAppModel_LibraryNavigationAndHints(t *testing.T) {
 	}
 }
 
+func TestAppModel_HintsStaySingleLineAndPlayerRemainsVisible(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(77, 24)
+	m.screen = ScreenLibrary
+	m.libraryScreen, _ = m.libraryScreen.Update(library.TracksLoadedMsg{
+		Tracks: []jellyfin.Track{{ID: "t-1", Name: "Track One"}},
+	})
+
+	newM, _ := m.Update(library.PlayTracksMsg{
+		Tracks:     []jellyfin.Track{{ID: "t-1", Name: "Track One"}},
+		StartIndex: 0,
+	})
+	m = newM.(*Model)
+
+	if got := lipgloss.Height(m.viewHints()); got != hintsHeight {
+		t.Fatalf("hints height = %d, want %d", got, hintsHeight)
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "1.0x") {
+		t.Fatalf("player footer is not visible:\n%s", view)
+	}
+	if got := len(strings.Split(view, "\n")); got != m.height {
+		t.Fatalf("view height = %d, want %d", got, m.height)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if got, want := lipgloss.Width(line), normalizeViewWidth(m.width); got > want {
+			t.Fatalf("line %d width = %d, want at most %d", i+1, got, want)
+		}
+	}
+}
+
 func TestAppModel_QueueHintsDoNotDuplicatePlayerControls(t *testing.T) {
 	m := New(nil, nil)
 	m.SetSize(220, 24)

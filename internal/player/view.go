@@ -34,14 +34,15 @@ func (m Model) View() string {
 		extras += fmt.Sprintf("  Sleep:%s", m.SleepRemaining)
 	}
 
-	w := m.width
-	if w > 0 {
-		w-- // safe width
+	style := m.styles.PlayerBar
+	barWidth := m.width
+	contentWidth := barWidth
+	if barWidth > 0 {
+		contentWidth = max(1, barWidth-style.GetHorizontalFrameSize())
 	}
 
-	// Calculate how much space we have for the title
 	fixedContent := fmt.Sprintf(" %s    %s  %s%s ", icon, timeStr, speedStr, extras)
-	availTitle := w - lipgloss.Width(fixedContent)
+	availTitle := contentWidth - lipgloss.Width(fixedContent)
 
 	title := m.Title
 	if availTitle > 0 && lipgloss.Width(title) > availTitle {
@@ -51,10 +52,9 @@ func (m Model) View() string {
 	}
 
 	content := fmt.Sprintf(" %s  %s  %s  %s%s ", icon, title, timeStr, speedStr, extras)
-
-	style := m.styles.PlayerBar
-	if w > 0 {
-		style = style.Width(w)
+	if barWidth > 0 {
+		content = ansi.Truncate(content, contentWidth, "")
+		style = style.Width(barWidth)
 	}
 
 	return lipgloss.PlaceVertical(1, lipgloss.Bottom, style.Render(content))

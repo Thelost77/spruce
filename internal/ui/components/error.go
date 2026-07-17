@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ErrorDismissTimeout is how long the error banner auto-dismisses after.
@@ -72,12 +73,11 @@ func (b ErrorBanner) View() string {
 		w = 40
 	}
 
-	banner := b.style.
-		Width(w).
-		Padding(0, 1).
-		Render("⚠ " + msg)
+	style := b.style.Padding(0, 1)
+	contentWidth := max(1, w-style.GetHorizontalFrameSize())
+	content := ansi.Truncate("⚠ "+msg, contentWidth, "…")
 
-	return banner
+	return style.Width(w).Render(content)
 }
 
 // enrichMessage adds contextual hints for known error patterns.

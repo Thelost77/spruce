@@ -8,6 +8,7 @@ import (
 	"github.com/Thelost77/spruce/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newTestModel() Model {
@@ -172,6 +173,26 @@ func TestViewPlaying(t *testing.T) {
 	}
 	if !strings.Contains(v, "1.0x") {
 		t.Error("expected '1.0x' in view")
+	}
+}
+
+func TestViewStaysSingleLineWithLongMetadata(t *testing.T) {
+	m := newTestModel()
+	m.Title = strings.Repeat("Long title ", 10)
+	m.Playing = true
+	m.Position = 754
+	m.Duration = 1725
+	m.Volume = 95
+	m.RepeatStatus = "🔁 Queue"
+	m.SleepRemaining = "45m"
+	m.SetWidth(30)
+
+	view := m.View()
+	if got := lipgloss.Height(view); got != 1 {
+		t.Fatalf("view height = %d, want 1: %q", got, view)
+	}
+	if got := lipgloss.Width(view); got > 30 {
+		t.Fatalf("view width = %d, want at most 30", got)
 	}
 }
 
