@@ -95,10 +95,12 @@ func (c *Client) authHeader() string {
 }
 
 // StreamURL constructs the direct stream URL for an audio item.
+// The auth token is intentionally not embedded in the URL; callers must send
+// StreamHeaders with the request so the token stays out of process args, logs,
+// and MPRIS metadata.
 func (c *Client) StreamURL(itemID, playSessionID string) string {
 	q := url.Values{}
 	q.Set("static", "true")
-	q.Set("api_key", c.token)
 	q.Set("playSessionId", playSessionID)
 	q.Set("deviceId", c.deviceID)
 	return fmt.Sprintf("%s/Audio/%s/stream?%s", c.baseURL, itemID, q.Encode())

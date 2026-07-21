@@ -37,6 +37,7 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		playSessionID := strconv.FormatInt(time.Now().UnixNano(), 16)
 		m.playSessionID = playSessionID
 		url := m.client.StreamURL(track.ID, playSessionID)
+		streamHeaders := m.client.StreamHeaders()
 		client := m.client
 		itemID := track.ID
 
@@ -47,7 +48,7 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		cmds = append(cmds, startReqCmd)
 
 		if m.mpv != nil {
-			cmds = append(cmds, player.LaunchCmd(m.mpv, url, 0, false, nil, m.playerState.Volume))
+			cmds = append(cmds, player.LaunchCmd(m.mpv, url, 0, false, streamHeaders, m.playerState.Volume))
 		}
 	}
 

@@ -263,13 +263,19 @@ func TestClient_StreamHelpersAndProgress(t *testing.T) {
 
 	client := NewClient(server.URL, "token-xyz", "user-123", "Mac Mini (Spruce)", "spruce-mac-mini-a41c29ef")
 	streamURL := client.StreamURL("trk-1", "test-session")
-	wantQuery := "api_key=token-xyz&deviceId=spruce-mac-mini-a41c29ef&playSessionId=test-session&static=true"
+	wantQuery := "deviceId=spruce-mac-mini-a41c29ef&playSessionId=test-session&static=true"
 	if streamURL != server.URL+"/Audio/trk-1/stream?"+wantQuery {
 		t.Errorf("unexpected StreamURL: %q", streamURL)
+	}
+	if strings.Contains(streamURL, "token-xyz") {
+		t.Errorf("StreamURL must not embed auth token: %q", streamURL)
 	}
 	headers := client.StreamHeaders()
 	if len(headers) != 1 || !strings.HasPrefix(headers[0], "Authorization: MediaBrowser") {
 		t.Errorf("unexpected StreamHeaders: %v", headers)
+	}
+	if !strings.Contains(headers[0], `Token="token-xyz"`) {
+		t.Errorf("StreamHeaders missing auth token: %v", headers)
 	}
 	if !strings.Contains(headers[0], `Device="Mac Mini (Spruce)"`) || !strings.Contains(headers[0], `DeviceId="spruce-mac-mini-a41c29ef"`) {
 		t.Errorf("unexpected device identity header: %v", headers)
