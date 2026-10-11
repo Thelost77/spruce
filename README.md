@@ -1,5 +1,19 @@
 # spruce
 
+> **spruce is now in the [pine](https://github.com/Thelost77/pine) repository.**
+> This repository is an archive. It gets no more updates.
+>
+> Use this command to install the current version:
+>
+> ```sh
+> go install github.com/Thelost77/pine/cmd/spruce@latest
+> ```
+>
+> The current documentation is in
+> [docs/spruce/README.md](https://github.com/Thelost77/pine/blob/main/docs/spruce/README.md).
+> The old command, `go install github.com/Thelost77/spruce@latest`, installs
+> v0.2.0. That is the last version from this repository.
+
 A terminal music client for [Jellyfin](https://jellyfin.org/). Browse albums and
 playlists, build a queue, and control playback without leaving the terminal.
 
